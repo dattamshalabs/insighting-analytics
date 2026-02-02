@@ -1,9 +1,24 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { BellAlertIcon, ClipboardIcon } from "@heroicons/react/24/outline";
 
+import { Modal } from "@/components/ui/Modal";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { api } from "@/lib/api";
 import type { Alert } from "@/types";
+
+function timeAgo(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -34,6 +49,10 @@ export default function AlertsPage() {
     refresh();
   };
 
+  const copyQuery = (query: string) => {
+    navigator.clipboard.writeText(query);
+  };
+
   return (
     <div className="p-6 max-w-4xl">
       <div className="flex items-center justify-between mb-6">
@@ -41,28 +60,25 @@ export default function AlertsPage() {
           <h2 className="text-lg font-semibold">Scheduled Alerts</h2>
           <p className="text-sm text-gray-400">Run SQL queries on a schedule and trigger webhooks when conditions are met.</p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-500"
-        >
-          {showForm ? "Cancel" : "New Alert"}
+        <button onClick={() => setShowForm(true)} className="btn-primary">
+          New Alert
         </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleSubmit} className="bg-gray-800 rounded-lg p-4 mb-6 space-y-3">
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Create Alert">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <input
             placeholder="Alert name"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+            className="input-glass w-full"
             required
           />
           <textarea
             placeholder="SQL Query"
             value={form.query}
             onChange={(e) => setForm({ ...form, query: e.target.value })}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm h-20 font-mono"
+            className="input-glass w-full h-20 font-mono"
             required
           />
           <div className="grid grid-cols-2 gap-3">
@@ -70,54 +86,61 @@ export default function AlertsPage() {
               placeholder="Cron (e.g. 0 9 * * *)"
               value={form.cron_expression}
               onChange={(e) => setForm({ ...form, cron_expression: e.target.value })}
-              className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm font-mono"
+              className="input-glass font-mono"
             />
             <input
               placeholder="Condition (e.g. result > 100)"
               value={form.threshold_condition}
               onChange={(e) => setForm({ ...form, threshold_condition: e.target.value })}
-              className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm font-mono"
+              className="input-glass font-mono"
             />
           </div>
           <input
             placeholder="Webhook URL (optional)"
             value={form.webhook_url}
             onChange={(e) => setForm({ ...form, webhook_url: e.target.value })}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+            className="input-glass w-full"
           />
-          <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded text-sm">
-            Create Alert
-          </button>
+          <button type="submit" className="btn-primary">Create Alert</button>
         </form>
-      )}
+      </Modal>
 
       {alerts.length === 0 ? (
-        <p className="text-gray-500">No alerts configured.</p>
+        <EmptyState
+          icon={<BellAlertIcon className="w-12 h-12" />}
+          title="No alerts configured"
+          description="Set up automated SQL queries that trigger when conditions are met."
+          action={<button onClick={() => setShowForm(true)} className="btn-primary">New Alert</button>}
+        />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {alerts.map((a) => (
-            <div key={a.id} className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium">{a.name}</span>
-                  <span className={`ml-2 text-xs px-2 py-0.5 rounded ${a.enabled ? "bg-green-900 text-green-300" : "bg-gray-700 text-gray-400"}`}>
-                    {a.enabled ? "active" : "disabled"}
-                  </span>
+            <div key={a.id} className="glass-card p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium">{a.name}</span>
+                    <ToggleSwitch
+                      checked={a.enabled}
+                      onChange={async (val) => { await api.updateAlert(a.id, { enabled: val }); refresh(); }}
+                    />
+                  </div>
                   <p className="text-xs text-gray-400 mt-1 font-mono">{a.cron_expression} | {a.threshold_condition}</p>
                   {a.last_triggered_at && (
-                    <p className="text-xs text-yellow-400 mt-1">Last triggered: {new Date(a.last_triggered_at).toLocaleString()}</p>
+                    <p className="text-xs text-yellow-400 mt-1">Triggered {timeAgo(a.last_triggered_at)}</p>
                   )}
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={async () => { await api.updateAlert(a.id, { enabled: !a.enabled }); refresh(); }}
-                    className="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600"
+                    onClick={() => copyQuery(a.query)}
+                    className="btn-ghost text-xs py-1 px-2"
+                    title="Copy SQL"
                   >
-                    {a.enabled ? "Disable" : "Enable"}
+                    <ClipboardIcon className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={async () => { await api.deleteAlert(a.id); refresh(); }}
-                    className="px-2 py-1 text-xs bg-red-900 text-red-300 rounded hover:bg-red-800"
+                    className="px-2 py-1 text-xs bg-red-900/60 text-red-300 rounded-xl hover:bg-red-800/60 transition-colors"
                   >
                     Delete
                   </button>

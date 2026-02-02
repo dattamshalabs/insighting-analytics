@@ -1,5 +1,8 @@
 // Shared TypeScript types
 
+import type { ChartType, ChartableData } from "@/lib/chartUtils";
+export type { ChartType, ChartableData };
+
 export interface DataQualityIssue {
   column?: string;
   check: string;
@@ -47,6 +50,7 @@ export interface Message {
   generated_sql?: string;
   generated_code?: string;
   chart_url?: string;
+  tabular_data?: ChartableData;
   recommendations: Recommendation[];
   data_quality?: DataQualityReport;
   stats?: StatResult;

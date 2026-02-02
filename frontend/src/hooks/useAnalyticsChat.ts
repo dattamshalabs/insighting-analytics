@@ -1,22 +1,35 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
-import type { ChatResponse, Message } from "@/types";
+import type { ChatResponse, Conversation, Message } from "@/types";
 
 export function useAnalyticsChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Conversation[]>([]);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const all = await api.getSessions();
+      setSessions(all.slice(0, 10));
+    } catch {
+      // silently fail — sessions sidebar is non-critical
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
 
   const send = useCallback(
     async (query: string, datasourceId?: string) => {
       setLoading(true);
       setError(null);
 
-      // Optimistic user message
       const userMsg: Message = {
         id: crypto.randomUUID(),
         role: "user",
@@ -27,11 +40,7 @@ export function useAnalyticsChat() {
       setMessages((prev) => [...prev, userMsg]);
 
       try {
-        const resp: ChatResponse = await api.chat(
-          query,
-          sessionId,
-          datasourceId
-        );
+        const resp: ChatResponse = await api.chat(query, sessionId, datasourceId);
         setSessionId(resp.session_id);
 
         const assistantMsg: Message = {
@@ -46,6 +55,7 @@ export function useAnalyticsChat() {
           created_at: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
+        loadSessions();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Unknown error";
         setError(msg);
@@ -53,11 +63,12 @@ export function useAnalyticsChat() {
         setLoading(false);
       }
     },
-    [sessionId]
+    [sessionId, loadSessions]
   );
 
   const loadSession = useCallback(async (sid: string) => {
     setLoading(true);
+    setError(null);
     try {
       const detail = await api.getHistory(sid);
       setSessionId(detail.id);
@@ -73,7 +84,8 @@ export function useAnalyticsChat() {
     setMessages([]);
     setSessionId(undefined);
     setError(null);
-  }, []);
+    loadSessions();
+  }, [loadSessions]);
 
-  return { messages, sessionId, loading, error, send, loadSession, reset };
+  return { messages, sessionId, loading, error, sessions, send, loadSession, loadSessions, reset };
 }

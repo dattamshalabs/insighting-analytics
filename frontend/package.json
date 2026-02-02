@@ -9,9 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "framer-motion": "^12.29.3",
     "next": "^14.2",
     "react": "^18.3",
-    "react-dom": "^18.3"
+    "react-dom": "^18.3",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^20",
