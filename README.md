@@ -1,178 +1,190 @@
 # Insighting Analytics
 
-A production-grade, local-first analytics platform powered by PandasAI, FastAPI, and **Ollama** (FOSS LLM).
-Chat with your PostgreSQL databases using natural language, with built-in
-statistical hypothesis testing, data quality validation, auto schema discovery, and action recommendations.
+A production-grade, local-first analytics platform that lets you **chat with your PostgreSQL databases using natural language**. Powered entirely by FOSS: [PandasAI](https://github.com/sinaptik-ai/pandas-ai), [Ollama](https://ollama.com), FastAPI, and Next.js.
+
+Ask questions like *"What were our top 10 customers by revenue last quarter?"* and get back SQL, results, charts, data quality warnings, and actionable recommendations — all from a single chat interface.
+
+---
+
+## Features
+
+| Category | What it does |
+|---|---|
+| **Natural Language to SQL** | Ask questions in plain English; PandasAI + Ollama generate and execute SQL |
+| **Auto Schema Discovery** | Introspects `information_schema`, detects foreign keys, infers joins by naming convention |
+| **Data Quality Validation** | Checks null rates, outliers (IQR), freshness, type consistency, volume sanity on every query |
+| **Action Recommendations** | Second LLM call generates prioritized business recommendations from analysis results |
+| **Conversation Memory** | Persistent sessions stored in SQLite; follow-up questions use prior context |
+| **Multi-Datasource** | Connect multiple PostgreSQL instances; credentials encrypted at rest (Fernet) |
+| **Business Glossary** | Map terms like "revenue" to SQL expressions; injected into every LLM prompt |
+| **Statistical Skills** | ANOVA, anomaly detection, correlation matrix — invoked automatically when relevant |
+| **Time-Series Skills** | Trend decomposition, exponential smoothing forecast, period-over-period comparison |
+| **Exports** | Download any conversation as PDF or CSV |
+| **Scheduled Alerts** | Cron-based SQL queries with threshold conditions; fires webhooks when triggered |
+| **Observability** | Logs every LLM call (tokens, latency) and SQL query; viewable in admin dashboard |
+| **Guardrails** | Read-only enforcement, 30s query timeout, 10K row cap, PII regex masking |
+| **Caching** | In-memory TTL cache for query results and LLM responses |
+
+---
+
+## Tech Stack
+
+Everything is free and open-source.
+
+| Layer | Technology |
+|---|---|
+| LLM | **Ollama** (`gpt-oss:120b-cloud` via Ollama Cloud, or any local model) |
+| Backend | Python 3.11, FastAPI, PandasAI, SQLAlchemy, scipy, statsmodels |
+| Frontend | Next.js 14 (App Router), TypeScript, TailwindCSS |
+| Databases | PostgreSQL (your data) + SQLite (app metadata — zero config) |
+| Scheduling | APScheduler with SQLite job store |
+| Caching | cachetools TTL (in-memory) + optional Redis |
+
+---
 
 ## Architecture
 
 ```
+User Query (NL)
+  |
+  v
+Next.js frontend ──POST /chat──> FastAPI backend
+                                    |
+                      Conversation memory loaded (SQLite)
+                      Schema context + glossary injected
+                                    |
+                                    v
+                    PandasAI SmartDatalake + Ollama LLM
+                      |                        |
+                  SQL generated            Guardrails applied
+                      |                   (read-only, timeout, row cap)
+                      v
+                  PostgreSQL ──results──> Data quality checks
+                                              |
+                                              v
+                                    Recommendations (2nd LLM call)
+                                              |
+                                              v
+                            Response: answer, SQL, chart, stats,
+                            data quality report, recommendations
+                                              |
+                                              v
+                                    Next.js renders:
+                                    - Message bubble
+                                    - Thought process (SQL/code)
+                                    - Data quality banner
+                                    - Recommendation cards
+                                    - Charts
+```
+
+---
+
+## Project Structure
+
+```
 insighting-analytics/
-├── backend/                       # Python 3.11+ / FastAPI
+├── backend/
 │   ├── app/
-│   │   ├── api/                   # FastAPI routers
-│   │   │   ├── chat.py            # POST /chat + conversation history
-│   │   │   ├── health.py          # GET /health
-│   │   │   ├── datasources.py     # CRUD datasource connections
-│   │   │   ├── schema.py          # Schema introspection + inferred relations
-│   │   │   ├── exports.py         # PDF/CSV export
-│   │   │   ├── alerts.py          # Scheduled insight alerts
-│   │   │   ├── glossary.py        # Business term → SQL mappings
-│   │   │   └── admin.py           # Observability logs
-│   │   ├── core/
-│   │   │   ├── config.py          # pydantic-settings (multi-datasource, cache, Ollama)
-│   │   │   ├── lifespan.py        # Startup: DB init, scheduler start
-│   │   │   ├── database.py        # SQLAlchemy engine/session (SQLite metadata DB)
-│   │   │   └── guardrails.py      # Read-only enforcement, timeout, PII masking
-│   │   ├── models/
-│   │   │   ├── schemas.py         # Pydantic request/response models
-│   │   │   └── orm.py             # SQLAlchemy ORM: conversations, datasources, alerts, glossary
-│   │   ├── services/
-│   │   │   ├── intelligence.py    # SmartDatalake orchestration (Ollama LLM)
-│   │   │   ├── schema_registry.py # Auto-introspect + inferred joins
-│   │   │   ├── data_quality.py    # Null rates, outliers, freshness, type checks
-│   │   │   ├── recommendation.py  # LLM-powered action recommendations
-│   │   │   ├── conversation.py    # Conversation memory (SQLite)
-│   │   │   ├── cache.py           # In-memory TTL cache
-│   │   │   ├── export.py          # PDF/CSV generation
-│   │   │   ├── scheduler.py       # APScheduler for alert cron jobs
-│   │   │   └── observability.py   # LLM/query call logging
-│   │   ├── skills/
-│   │   │   ├── statistical.py     # ANOVA, anomaly detection, correlation
-│   │   │   ├── timeseries.py      # Trend detection, forecasting, period comparison
-│   │   │   └── profiling.py       # Auto data profiling on datasource connect
-│   │   ├── static/charts/
-│   │   └── main.py
-│   ├── tests/
+│   │   ├── api/            8 routers (chat, health, datasources, schema, exports, alerts, glossary, admin)
+│   │   ├── core/           config, database, guardrails, lifespan
+│   │   ├── models/         Pydantic schemas + SQLAlchemy ORM (8 tables)
+│   │   ├── services/       9 services (intelligence, schema_registry, data_quality, recommendation,
+│   │   │                   conversation, cache, export, scheduler, observability)
+│   │   ├── skills/         statistical, timeseries, profiling
+│   │   ├── static/charts/  generated chart images
+│   │   └── main.py         FastAPI app entry point
 │   ├── pyproject.toml
 │   └── .env.example
-├── frontend/                      # Next.js 14 App Router / TypeScript
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx           # Chat (main)
-│   │   │   ├── datasources/       # Manage PG connections
-│   │   │   ├── glossary/          # Business glossary editor
-│   │   │   ├── alerts/            # Scheduled alerts manager
-│   │   │   ├── admin/             # Observability logs viewer
-│   │   │   └── layout.tsx         # Sidebar nav
-│   │   ├── components/
-│   │   │   ├── chat/              # MessageBubble, ThoughtProcess, RecommendationCard, DataQualityBanner
-│   │   │   ├── stats/             # SignificanceBadge, TimeSeriesChart
-│   │   │   ├── schema/            # SchemaViewer (ERD-style)
-│   │   │   └── export/            # ExportMenu
-│   │   ├── hooks/                 # useAnalyticsChat, useDatasources, useSchemaMap
-│   │   ├── lib/                   # API client
-│   │   └── types/                 # Shared TypeScript types
-│   ├── package.json
-│   └── .env.example
+├── frontend/
+│   └── src/
+│       ├── app/            5 pages (chat, datasources, glossary, alerts, admin)
+│       ├── components/     10 components (chat, stats, schema, export)
+│       ├── hooks/          3 hooks (useAnalyticsChat, useDatasources, useSchemaMap)
+│       ├── lib/            API client
+│       └── types/          shared TypeScript types
 ├── scripts/
-│   └── run_dev.sh
-├── .gitignore
+│   └── run_dev.sh          starts backend + frontend with venv
+├── CLAUDE.md               context file for Claude Code
+├── SETUP.md                team setup guide
 └── README.md
 ```
 
-## Tech Stack (FOSS-First)
-
-| Layer      | Technology                                              |
-|------------|---------------------------------------------------------|
-| Backend    | FastAPI, PandasAI, SQLAlchemy, scipy, statsmodels       |
-| Frontend   | Next.js 14, TailwindCSS, TypeScript                    |
-| Database   | PostgreSQL (any host) + SQLite (local metadata)         |
-| LLM        | **Ollama** (llama3, mistral, etc.) — fully open-source  |
-| Stats      | scipy (ANOVA), statsmodels (time series), IQR anomaly   |
-| Scheduling | APScheduler                                             |
-| Caching    | cachetools (in-memory TTL) + optional Redis             |
-
-## Data Flow
-
-```
-User Query (NL) → Next.js → FastAPI /chat
-  → Conversation memory loaded (SQLite)
-  → Schema context + Business glossary injected into prompt
-  → PandasAI SmartDatalake (PostgreSQLConnector + Ollama LLM)
-    → SQL generation + execution on PostgreSQL
-    → Guardrails: read-only check, row limit, timeout
-    → Optional: Statistical/TimeSeries skills
-    → Optional: Chart saved to /static/charts/
-  → Data quality checks on result
-  → Recommendations generated via second Ollama call
-  → Response { answer, sql, chart, stats, data_quality, recommendations }
-  → Next.js → Rendered UI with quality banners + recommendation cards
-```
-
-## Features
-
-- **Natural language to SQL** via PandasAI + Ollama (FOSS)
-- **Auto schema discovery** with relationship inference (FK + name-matching)
-- **Data quality validation** — nulls, outliers, freshness, type consistency
-- **Action recommendations** — LLM-generated business advice per query
-- **Conversation memory** — persistent sessions with context for follow-up queries
-- **Multi-datasource** — connect multiple PostgreSQL instances
-- **Business glossary** — map terms like "revenue" to SQL expressions
-- **Exports** — PDF and CSV for any conversation
-- **Scheduled alerts** — cron-based queries with webhook notifications
-- **Observability** — LLM call logs, query logs, latency tracking
-- **Statistical skills** — ANOVA, anomaly detection, correlation analysis
-- **Time-series skills** — trend detection, forecasting, period-over-period comparison
-- **Guardrails** — read-only enforcement, query timeout, row caps, PII masking
+---
 
 ## Quick Start
 
+See **[SETUP.md](SETUP.md)** for the full team setup guide with prerequisites and troubleshooting.
+
 ```bash
-# 1. Copy env files
+# Clone
+git clone https://github.com/dattamshalabs/insighting-analytics.git
+cd insighting-analytics
+
+# Copy env files and fill in credentials
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 
-# 2. Fill in your credentials in backend/.env
-#    - PostgreSQL connection details
-#    - Ollama base URL (default: http://localhost:11434)
-
-# 3. Install backend dependencies
-cd backend && pip install -e .
-
-# 4. Install frontend dependencies
-cd frontend && npm install
-
-# 5. Start Ollama (if running locally)
-ollama serve
-
-# 6. Run both services
+# Run (creates venv, installs deps, starts both services)
 ./scripts/run_dev.sh
 ```
 
-Backend: http://localhost:8000
-Frontend: http://localhost:3000
+Backend: http://localhost:8000 | Frontend: http://localhost:3000 | API docs: http://localhost:8000/docs
 
-## API Endpoints
+---
 
-| Method | Path                              | Description                    |
-|--------|-----------------------------------|--------------------------------|
-| GET    | /health                           | Health check                   |
-| POST   | /chat                             | Send NL query                  |
-| GET    | /chat/sessions                    | List conversations             |
-| GET    | /chat/history/{id}                | Get conversation messages      |
-| GET    | /datasources                      | List datasources               |
-| POST   | /datasources                      | Register a PG connection       |
-| DELETE | /datasources/{id}                 | Remove datasource              |
-| POST   | /datasources/{id}/refresh-schema  | Re-introspect schema           |
-| GET    | /schema/{datasource_id}           | Get schema map + relations     |
-| GET    | /export/{conversation_id}         | Export as CSV or PDF           |
-| GET    | /alerts                           | List alerts                    |
-| POST   | /alerts                           | Create alert                   |
-| PUT    | /alerts/{id}                      | Update alert                   |
-| DELETE | /alerts/{id}                      | Delete alert                   |
-| GET    | /glossary                         | List glossary terms            |
-| POST   | /glossary                         | Create term                    |
-| PUT    | /glossary/{id}                    | Update term                    |
-| DELETE | /glossary/{id}                    | Delete term                    |
-| GET    | /admin/logs/llm                   | LLM call logs                  |
-| GET    | /admin/logs/query                 | SQL query logs                 |
-| GET    | /admin/cache/stats                | Cache statistics               |
-| POST   | /admin/cache/clear                | Clear all caches               |
+## API Reference
 
-## Constraints
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/chat` | Send natural language query |
+| `GET` | `/chat/sessions` | List all conversations |
+| `GET` | `/chat/history/{session_id}` | Get conversation with messages |
+| `GET` | `/datasources` | List connected datasources |
+| `POST` | `/datasources` | Register a PostgreSQL connection |
+| `DELETE` | `/datasources/{id}` | Remove a datasource |
+| `POST` | `/datasources/{id}/refresh-schema` | Re-introspect schema |
+| `GET` | `/schema/{datasource_id}` | Get schema map with inferred relations |
+| `GET` | `/export/{conversation_id}?format=csv\|pdf` | Export conversation |
+| `GET` | `/alerts` | List scheduled alerts |
+| `POST` | `/alerts` | Create an alert |
+| `PUT` | `/alerts/{id}` | Update an alert |
+| `DELETE` | `/alerts/{id}` | Delete an alert |
+| `GET` | `/glossary` | List business glossary terms |
+| `POST` | `/glossary` | Create a glossary term |
+| `PUT` | `/glossary/{id}` | Update a glossary term |
+| `DELETE` | `/glossary/{id}` | Delete a glossary term |
+| `GET` | `/admin/logs/llm` | LLM call logs |
+| `GET` | `/admin/logs/query` | SQL query execution logs |
+| `GET` | `/admin/cache/stats` | Cache hit/miss statistics |
+| `POST` | `/admin/cache/clear` | Clear all caches |
 
-- **No Docker** — raw local build optimized for UAT
-- **FOSS-first** — Ollama for LLM inference, all OSS dependencies
-- **Strictly typed** — Pydantic models + TypeScript throughout
-- **Modular** — Service/Router pattern, separated concerns
+Interactive API docs are available at `/docs` (Swagger) and `/redoc` when the backend is running.
+
+---
+
+## Pages
+
+| Route | Purpose |
+|---|---|
+| `/` | Main chat interface — ask questions, see answers with charts and recommendations |
+| `/datasources` | Connect, manage, and introspect PostgreSQL databases |
+| `/glossary` | Define business terms and their SQL equivalents |
+| `/alerts` | Create cron-scheduled SQL queries with threshold-based webhook alerts |
+| `/admin` | View LLM call logs, query logs, and cache statistics |
+
+---
+
+## Design Principles
+
+- **No Docker** — raw local build, optimized for rapid UAT iteration
+- **FOSS-first** — Ollama for inference, no proprietary API dependencies
+- **Strictly typed** — Pydantic on the backend, TypeScript on the frontend
+- **Modular** — service/router pattern; each service has a single responsibility
+- **Safe by default** — read-only queries, timeout limits, PII masking, encrypted credentials
+
+---
+
+## License
+
+Private. Internal use only.
