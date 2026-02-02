@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Generated charts
+backend/app/static/charts/*.png
+backend/app/static/charts/*.jpg
+!backend/app/static/charts/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+pandasai.log
+
+# SQLite metadata DB
+*.db
+
+# Exports
+backend/exports/
