@@ -1,6 +1,6 @@
 # Setup Guide
 
-Step-by-step instructions for the team to get Insighting Analytics running locally for UAT.
+Step-by-step instructions to get Insighting Analytics running on a Linux server.
 
 ---
 
@@ -14,75 +14,44 @@ Step-by-step instructions for the team to get Insighting Analytics running local
 | Git | any | `git --version` |
 | PostgreSQL | access to any PG instance (local, RDS, etc.) | `psql --version` |
 
-### Install Python 3.11 (if not present)
-
-**macOS (Homebrew):**
-```bash
-brew install python@3.11
-```
-
-**Ubuntu/Debian:**
-```bash
-sudo apt update && sudo apt install python3.11 python3.11-venv
-```
-
-**pyenv (any platform):**
-```bash
-pyenv install 3.11
-pyenv local 3.11
-```
-
-### Install Node.js 18+ (if not present)
-
-```bash
-# via nvm (recommended)
-nvm install 18
-nvm use 18
-
-# or via Homebrew
-brew install node@18
-```
-
 ---
 
-## 1. Clone the repository
+## First-Time Setup (Linux Server)
+
+### 1. Install prerequisites
+
+```bash
+sudo apt update && sudo apt install -y python3.11 python3.11-venv git curl
+
+# Install Node.js 18+
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+### 2. Clone the repo
 
 ```bash
 git clone https://github.com/dattamshalabs/insighting-analytics.git
 cd insighting-analytics
 ```
 
----
-
-## 2. Backend setup
+### 3. Backend setup
 
 ```bash
 cd backend
-
-# Create virtual environment with Python 3.11
 python3.11 -m venv .venv
-
-# Activate it
-source .venv/bin/activate    # macOS/Linux
-# .venv\Scripts\activate     # Windows
-
-# Install all dependencies
+source .venv/bin/activate
 pip install -e ".[dev]"
 
 # Verify
 python -c "from app.main import app; print('Backend OK')"
 ```
 
-You should see `Backend OK`.
-
----
-
-## 3. Configure environment
+### 4. Configure environment
 
 ```bash
-# From the repo root
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
+cp .env.example .env
+nano .env
 ```
 
 Edit `backend/.env` with your actual values:
@@ -116,70 +85,97 @@ MAX_RESULT_ROWS=10000
 PII_MASKING_ENABLED=true
 ```
 
-`frontend/.env.local` — usually no changes needed:
+### 5. Frontend setup
+
+```bash
+cd ../frontend
+npm install
+cp .env.example .env.local
+nano .env.local
+```
+
+`frontend/.env.local` — update if backend is on a different host/port:
+
 ```ini
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
----
-
-## 4. Frontend setup
+### 6. Build frontend for production
 
 ```bash
-cd frontend
-npm install
-```
-
-Verify:
-```bash
-npx next build
+npm run build
 ```
 
 You should see `Compiled successfully` and a route table.
 
----
+### 7. Start and verify
 
-## 5. Run
-
-**Option A — combined script (recommended):**
 ```bash
-# From repo root
-./scripts/run_dev.sh
-```
-
-**Option B — separate terminals:**
-
-Terminal 1 (backend):
-```bash
-cd backend
+# Start backend
+cd ../backend
 source .venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+
+# Start frontend
+cd ../frontend
+npm start &
 ```
-
-Terminal 2 (frontend):
-```bash
-cd frontend
-npm run dev
-```
-
----
-
-## 6. Verify it's working
 
 | Check | Command / URL | Expected |
 |---|---|---|
 | Backend health | `curl http://localhost:8000/health` | `{"status":"ok","version":"0.2.0"}` |
 | API docs | http://localhost:8000/docs | Swagger UI loads |
-| Frontend | http://localhost:3000 | Chat page loads with sidebar |
+| Frontend | http://localhost:3000 | Login page loads |
+
+**Login credentials:** `admin` / `admin123`
 
 ---
 
-## 7. Connect a datasource (first time)
+## Every Restart
 
-You have two options:
+```bash
+cd /path/to/insighting-analytics
+
+# Start backend
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+
+# Start frontend
+cd ../frontend
+npm start &
+```
+
+Or use the included script:
+
+```bash
+cd /path/to/insighting-analytics
+./scripts/run_dev.sh
+```
+
+### Persistent service (survives SSH disconnect)
+
+```bash
+cd /path/to/insighting-analytics
+
+nohup bash -c 'cd backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000' > backend.log 2>&1 &
+nohup bash -c 'cd frontend && npm start' > frontend.log 2>&1 &
+```
+
+To stop:
+
+```bash
+# Find and kill processes
+lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill
+lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill
+```
+
+---
+
+## Connect a Datasource
 
 **Option A — via `.env` (default datasource):**
-The PG credentials in `backend/.env` are used as the default datasource. PandasAI will query this database when you send a chat message.
+The PG credentials in `backend/.env` are used as the default datasource.
 
 **Option B — via the UI (multiple datasources):**
 1. Go to http://localhost:3000/datasources
@@ -187,46 +183,6 @@ The PG credentials in `backend/.env` are used as the default datasource. PandasA
 3. Fill in the connection details
 4. Click "Connect"
 5. The schema will be auto-introspected
-
----
-
-## 8. Test the chat
-
-1. Go to http://localhost:3000
-2. Type a question like: `How many rows are in each table?`
-3. You should see:
-   - An answer with data
-   - A "Show thought process" link (click to see generated SQL/code)
-   - Data quality warnings (if applicable)
-   - Recommendation cards (if the LLM generates them)
-
----
-
-## UAT Test Scenarios
-
-### Basic queries
-- [ ] "Show me the first 10 rows of [table_name]"
-- [ ] "How many records are in [table_name]?"
-- [ ] "What are the column names and types in [table_name]?"
-
-### Analytical queries
-- [ ] "What is the average [numeric_column] grouped by [category_column]?"
-- [ ] "Show me the trend of [value] over [date_column]"
-- [ ] "Which [entity] has the highest [metric]?"
-
-### Features
-- [ ] Connect a datasource via /datasources and verify schema loads
-- [ ] Click "Schema" button and verify tables/columns/relationships appear
-- [ ] Add a glossary term via /glossary (e.g., "revenue" = `SUM(amount)`)
-- [ ] Send a query using that glossary term
-- [ ] Create an alert via /alerts
-- [ ] Check /admin for LLM and query logs
-- [ ] Export a conversation as CSV
-- [ ] Start a new chat and verify a follow-up question uses context
-
-### Guardrails
-- [ ] Try a write query like "DELETE FROM users" — should be blocked by PandasAI
-- [ ] Verify PII masking: if results contain email addresses, they should appear as `[EMAIL]`
 
 ---
 
@@ -246,7 +202,7 @@ Recreate the venv with `python3.11 -m venv .venv`.
 
 ### `Frontend shows "Failed to fetch"` or CORS errors
 - Make sure the backend is running on port 8000
-- Check that `CORS_ORIGINS` in `backend/.env` includes `http://localhost:3000`
+- Check that `CORS_ORIGINS` in `backend/.env` includes your frontend URL
 - Check that `NEXT_PUBLIC_API_URL` in `frontend/.env.local` is `http://localhost:8000`
 
 ### `insighting_meta.db` is corrupted or you want to reset
@@ -263,21 +219,6 @@ cd frontend && npm install
 
 ### Port already in use
 ```bash
-# Find and kill the process on port 8000
-lsof -i :8000 | grep LISTEN
-kill -9 <PID>
-
-# Same for port 3000
-lsof -i :3000 | grep LISTEN
-kill -9 <PID>
+lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill
+lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill
 ```
-
----
-
-## Team Contacts
-
-| Role | Who | For |
-|---|---|---|
-| Ollama credentials | Team lead | `OLLAMA_USERNAME` and `OLLAMA_API_TOKEN` values |
-| PostgreSQL access | DBA / DevOps | Connection strings for test databases |
-| Bug reports | GitHub Issues | https://github.com/dattamshalabs/insighting-analytics/issues |
