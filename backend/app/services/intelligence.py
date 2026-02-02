@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-import httpx
 import pandas as pd
+from openai import OpenAI
 from pandasai import SmartDatalake
-from pandasai.connectors import PostgreSQLConnector
-from pandasai.llm.local_llm import LocalLLM
+from pandasai.llm.base import LLM
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.guardrails import inject_row_limit, mask_pii, validate_sql_readonly
+from app.core.guardrails import mask_pii
 from app.models.schemas import (
     ChatResponse,
     DataQualityReport,
@@ -33,30 +31,76 @@ from app.services import schema_registry
 logger = logging.getLogger(__name__)
 
 
+class OllamaCloudLLM(LLM):
+    """PandasAI v3-compatible LLM that calls Ollama Cloud via OpenAI client."""
+
+    def __init__(self, api_base: str, model: str, api_key: str):
+        self.model = model
+        self._client = OpenAI(base_url=api_base, api_key=api_key)
+
+    @property
+    def type(self) -> str:
+        return "ollama-cloud"
+
+    def call(self, instruction, context=None) -> str:
+        # instruction is a BasePrompt object in PandasAI v3
+        prompt = instruction.to_string() if hasattr(instruction, "to_string") else str(instruction)
+        resp = self._client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content or ""
+
+
 def _build_llm():
-    """Build an Ollama-backed LLM for PandasAI."""
-    return LocalLLM(
+    """Build an Ollama Cloud-backed LLM for PandasAI."""
+    return OllamaCloudLLM(
         api_base=f"{settings.ollama_base_url}/v1",
         model=settings.ollama_model,
+        api_key=settings.ollama_api_token or "dummy",
     )
 
 
-def _build_connector(
+def _load_dataframes(
     host: Optional[str] = None,
     port: Optional[int] = None,
     database: Optional[str] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
-) -> PostgreSQLConnector:
-    return PostgreSQLConnector(
-        config={
-            "host": host or settings.pg_host,
-            "port": port or settings.pg_port,
-            "database": database or settings.pg_database,
-            "username": username or settings.pg_username,
-            "password": password or settings.pg_password,
-        }
-    )
+) -> List[pd.DataFrame]:
+    """Load all tables from PostgreSQL as DataFrames."""
+    pwd = password if password is not None else (settings.pg_password or "")
+    h = host or settings.pg_host
+    p = port or settings.pg_port
+    db = database or settings.pg_database
+    u = username or settings.pg_username
+
+    if pwd:
+        conn_str = f"postgresql://{u}:{pwd}@{h}:{p}/{db}"
+    else:
+        conn_str = f"postgresql://{u}@{h}:{p}/{db}"
+
+    engine = create_engine(conn_str, pool_pre_ping=True)
+
+    # Get all table names
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+        ))
+        table_names = [row[0] for row in result]
+
+    dfs = []
+    for table_name in table_names:
+        try:
+            df = pd.read_sql_table(table_name, engine, schema="public")
+            df.name = table_name  # PandasAI uses this to identify tables
+            dfs.append(df)
+            logger.info("Loaded table '%s': %d rows, %d cols", table_name, len(df), len(df.columns))
+        except Exception as e:
+            logger.warning("Failed to load table '%s': %s", table_name, e)
+
+    return dfs
 
 
 def _build_system_prompt(datasource_id: Optional[str], glossary_terms: list[dict] | None = None) -> str:
@@ -98,23 +142,27 @@ async def process_query(
     glossary_rows = db.query(GlossaryTerm).all()
     glossary_terms = [{"term": g.term, "sql_expression": g.sql_expression} for g in glossary_rows]
 
-    # 4. Build LLM + connector
+    # 4. Build LLM + load DataFrames from PG
     llm = _build_llm()
-    connector = _build_connector()
+    dfs = _load_dataframes()
     chart_dir = Path(settings.chart_output_dir)
     chart_dir.mkdir(parents=True, exist_ok=True)
 
-    # 5. Build SmartDatalake
+    if not dfs:
+        answer = "No tables found in the database. Please connect a datasource with data."
+        conv_svc.add_message(db, conv.id, "assistant", answer)
+        return ChatResponse(session_id=conv.id, answer=answer)
+
+    # 5. Build SmartDatalake with DataFrames
+    system_prompt = _build_system_prompt(datasource_id, glossary_terms)
     dl = SmartDatalake(
-        [connector],
+        dfs,
         config={
             "llm": llm,
             "save_charts": True,
             "save_charts_path": str(chart_dir),
             "verbose": False,
-            "custom_prompts": {
-                "generate_python_code": _build_system_prompt(datasource_id, glossary_terms),
-            },
+            "enable_cache": False,
         },
     )
 
@@ -123,11 +171,13 @@ async def process_query(
     generated_code = None
     chart_url = None
     stats_result = None
-    result_df = None
 
     with obs_svc.track_latency("pandasai_query") as timing:
         try:
-            result = dl.chat(query)
+            full_query = query
+            if system_prompt:
+                full_query = f"Context:\n{system_prompt}\n\nQuestion: {query}"
+            result = dl.chat(full_query)
         except Exception as e:
             logger.error("PandasAI query failed: %s", e)
             answer = f"I encountered an error processing your query: {str(e)}"
@@ -136,7 +186,7 @@ async def process_query(
 
     answer = str(result) if result is not None else "No result returned."
 
-    # Try to extract generated code/SQL from PandasAI internals
+    # Try to extract generated code from PandasAI internals
     try:
         last_code = dl.last_code_generated
         if last_code:
@@ -157,8 +207,7 @@ async def process_query(
     dq_report = DataQualityReport()
     try:
         if isinstance(result, pd.DataFrame):
-            result_df = result
-            dq_report = dq_svc.check_dataframe(result_df)
+            dq_report = dq_svc.check_dataframe(result)
     except Exception as e:
         logger.warning("Data quality check failed: %s", e)
 

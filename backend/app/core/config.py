@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     pg_ssl_mode: str = "disable"
 
     # --- LLM (Ollama Cloud – FOSS) ---
-    ollama_base_url: str = "https://api.ollama.com"
+    ollama_base_url: str = "https://ollama.com"
     ollama_model: str = "gpt-oss:120b-cloud"
     ollama_username: Optional[str] = None
     ollama_api_token: Optional[str] = None
