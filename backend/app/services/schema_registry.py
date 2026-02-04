@@ -162,3 +162,108 @@ def clear(datasource_id: Optional[str] = None) -> None:
         _registry.pop(datasource_id, None)
     else:
         _registry.clear()
+
+
+# Table-specific question templates for dynamic suggestions
+_QUESTION_TEMPLATES: Dict[str, List[str]] = {
+    "employees": [
+        "What is the current headcount by department?",
+        "Show me the gender diversity breakdown across locations",
+        "What is the average salary by job level?",
+        "Which departments have the most employees?",
+        "How has headcount changed over time by hire date?",
+    ],
+    "attrition": [
+        "What is our attrition rate by department?",
+        "Show me voluntary vs involuntary termination trends",
+        "What are the top reasons for employee attrition?",
+        "Which departments have the highest voluntary turnover?",
+        "What is the average tenure of employees who left?",
+    ],
+    "pulse_survey_responses": [
+        "What is the average engagement score by department?",
+        "Show me employee satisfaction trends over time",
+        "Which department has the best work-life balance scores?",
+        "Compare manager effectiveness scores across teams",
+        "What percentage of employees would recommend the company?",
+    ],
+    "pulse_surveys": [
+        "What is the survey response rate trend?",
+        "Compare Q1 vs Q4 engagement survey results",
+    ],
+    "learning_development": [
+        "Which employees completed the most training courses?",
+        "What is the training completion rate by department?",
+        "Show me the most popular course categories",
+        "What is the average training score by department?",
+        "How much are we spending on learning and development?",
+    ],
+    "recognition": [
+        "Who received the most recognition awards?",
+        "Show me recognition distribution by category",
+        "Which department gives out the most recognition?",
+        "What is the trend of recognition awards over time?",
+        "How much monetary value has been awarded in recognition?",
+    ],
+    "departments": [
+        "List all departments with their cost centers",
+        "How many employees are in each department?",
+    ],
+    "locations": [
+        "Show me employee distribution by location",
+        "Which regions have the most headcount?",
+    ],
+    "job_levels": [
+        "What is the salary range by job level?",
+        "How many employees are at each level?",
+    ],
+}
+
+# Generic templates for unknown tables
+_GENERIC_TEMPLATES = [
+    "Show me the total count of records in {table}",
+    "What are the top 10 records in {table}?",
+    "Show me {table} breakdown by category",
+]
+
+
+def get_suggested_questions(datasource_id: str, max_questions: int = 8) -> List[str]:
+    """Generate contextual suggested questions based on available tables."""
+    schema = _registry.get(datasource_id)
+    if not schema:
+        return []
+
+    questions: List[str] = []
+    table_names = {t.name.lower() for t in schema.tables}
+
+    # Priority order for HR analytics tables
+    priority_tables = [
+        "employees", "attrition", "pulse_survey_responses",
+        "learning_development", "recognition", "departments"
+    ]
+
+    # Add questions from priority tables first
+    for table in priority_tables:
+        if table in table_names and table in _QUESTION_TEMPLATES:
+            # Add 1-2 questions per priority table
+            for q in _QUESTION_TEMPLATES[table][:2]:
+                if len(questions) < max_questions:
+                    questions.append(q)
+
+    # If we still need more questions, add from remaining matched tables
+    for table in table_names:
+        if table in _QUESTION_TEMPLATES and len(questions) < max_questions:
+            for q in _QUESTION_TEMPLATES[table]:
+                if q not in questions and len(questions) < max_questions:
+                    questions.append(q)
+
+    # If still not enough, add generic questions for other tables
+    for t in schema.tables:
+        if len(questions) >= max_questions:
+            break
+        if t.name.lower() not in _QUESTION_TEMPLATES:
+            for template in _GENERIC_TEMPLATES[:1]:
+                if len(questions) < max_questions:
+                    questions.append(template.format(table=t.name))
+
+    return questions[:max_questions]

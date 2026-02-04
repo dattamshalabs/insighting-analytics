@@ -66,6 +66,9 @@ export const api = {
   getSchema: (datasourceId: string) =>
     request<SchemaMap>(`/schema/${datasourceId}`),
 
+  getSuggestedQuestions: (datasourceId: string, limit = 8) =>
+    request<string[]>(`/schema/${datasourceId}/suggestions?limit=${limit}`),
+
   // Export
   exportConversation: (conversationId: string, format: "csv" | "pdf") =>
     `${API_URL}/export/${conversationId}?format=${format}`,
