@@ -15,7 +15,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-// --- Chat ---
+// --- Types ---
 import type {
   Alert,
   AlertCreate,
@@ -28,6 +28,7 @@ import type {
   GlossaryTermCreate,
   LLMLog,
   QueryLog,
+  Recommendation,
   SchemaMap,
 } from "@/types";
 
@@ -44,6 +45,32 @@ export const api = {
   getHistory: (sessionId: string) =>
     request<ConversationDetail>(`/chat/history/${sessionId}`),
 
+  // On-demand recommendations
+  getRecommendations: (messageId: string, sessionId: string) =>
+    request<{ recommendations: Recommendation[] }>("/chat/recommendations", {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId, session_id: sessionId }),
+    }),
+
+  // Message feedback
+  submitFeedback: (messageId: string, rating: "up" | "down") =>
+    request<{ status: string }>("/chat/feedback", {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId, rating }),
+    }),
+
+  // Conversation management
+  renameSession: (sessionId: string, title: string) =>
+    request<Conversation>(`/chat/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+
+  deleteSession: (sessionId: string) =>
+    request<{ status: string }>(`/chat/sessions/${sessionId}`, {
+      method: "DELETE",
+    }),
+
   // Datasources
   getDatasources: () => request<Datasource[]>("/datasources"),
 
@@ -55,6 +82,18 @@ export const api = {
 
   deleteDatasource: (id: string) =>
     request<void>(`/datasources/${id}`, { method: "DELETE" }),
+
+  uploadDatasource: async (file: File, name?: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (name) formData.append("name", name);
+    const res = await fetch(`${API_URL}/datasources/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    return res.json() as Promise<Datasource>;
+  },
 
   refreshSchema: (id: string) =>
     request<{ tables: number; relations: number }>(
@@ -118,4 +157,37 @@ export const api = {
 
   clearCache: () =>
     request<{ status: string }>("/admin/cache/clear", { method: "POST" }),
+
+  // Dashboards
+  generateDashboard: (prompt: string, datasource_id?: string) =>
+    request<DashboardResponse>("/dashboards/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, datasource_id }),
+    }),
+
+  getDashboards: () => request<DashboardResponse[]>("/dashboards"),
+
+  getDashboard: (id: string) => request<DashboardResponse>(`/dashboards/${id}`),
+
+  deleteDashboard: (id: string) =>
+    request<void>(`/dashboards/${id}`, { method: "DELETE" }),
 };
+
+// Dashboard types
+interface DashboardWidget {
+  id: string;
+  type: string;
+  title: string;
+  data: unknown;
+  config?: Record<string, unknown>;
+}
+
+export interface DashboardResponse {
+  id: string;
+  title: string;
+  datasource_id?: string;
+  prompt?: string;
+  widgets: DashboardWidget[];
+  created_at: string;
+  updated_at: string;
+}

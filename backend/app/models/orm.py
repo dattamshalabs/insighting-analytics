@@ -37,12 +37,19 @@ class Datasource(Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     name = Column(String, nullable=False)
-    host = Column(String, nullable=False)
-    port = Column(Integer, default=5432)
-    database = Column(String, nullable=False)
-    username = Column(String, nullable=False)
-    encrypted_password = Column(String, nullable=False)
+    db_type = Column(String, default="postgresql")  # postgresql | mysql | mssql | databricks | csv | excel
+    host = Column(String, nullable=True)
+    port = Column(Integer, nullable=True)
+    database = Column(String, nullable=True)
+    username = Column(String, nullable=True)
+    encrypted_password = Column(String, nullable=True)
     ssl_mode = Column(String, default="disable")
+    # Databricks-specific
+    http_path = Column(String, nullable=True)
+    catalog = Column(String, nullable=True)
+    access_token = Column(String, nullable=True)
+    # File-based (CSV/Excel)
+    file_path = Column(String, nullable=True)
     is_default = Column(Boolean, default=False)
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
@@ -93,6 +100,15 @@ class Annotation(Base):
     message_id = Column(String, ForeignKey("messages.id"), nullable=False)
     author = Column(String, default="user")
     text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class MessageFeedback(Base):
+    __tablename__ = "message_feedback"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    message_id = Column(String, ForeignKey("messages.id"), nullable=False)
+    rating = Column(String, nullable=False)  # "up" | "down"
     created_at = Column(DateTime, default=_now)
 
 
@@ -158,3 +174,19 @@ class QueryLog(Base):
     duration_ms = Column(Float, nullable=True)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+# ---------------------------------------------------------------------------
+# Dashboards
+# ---------------------------------------------------------------------------
+
+class Dashboard(Base):
+    __tablename__ = "dashboards"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    title = Column(String, nullable=False)
+    datasource_id = Column(String, ForeignKey("datasources.id"), nullable=True)
+    prompt = Column(Text, nullable=True)
+    widgets_json = Column(Text, nullable=False, default="[]")  # JSON array of widget configs
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)

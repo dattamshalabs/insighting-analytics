@@ -41,3 +41,9 @@ pandasai.log
 
 # Exports
 backend/exports/
+
+# Uploaded data files
+data/uploads/
+
+# PID tracking
+.pids

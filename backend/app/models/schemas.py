@@ -92,24 +92,31 @@ class ConversationDetailOut(ConversationOut):
 
 class DatasourceCreate(BaseModel):
     name: str
-    host: str
-    port: int = 5432
-    database: str
-    username: str
-    password: str
+    db_type: str = "postgresql"  # postgresql | mysql | mssql | databricks | csv | excel
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
     ssl_mode: str = "disable"
     is_default: bool = False
+    # Databricks-specific
+    http_path: Optional[str] = None
+    catalog: Optional[str] = None
+    access_token: Optional[str] = None
 
 
 class DatasourceOut(BaseModel):
     id: str
     name: str
-    host: str
-    port: int
-    database: str
-    username: str
-    ssl_mode: str
-    is_default: bool
+    db_type: str = "postgresql"
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
+    username: Optional[str] = None
+    ssl_mode: str = "disable"
+    is_default: bool = False
+    file_path: Optional[str] = None
     created_at: datetime.datetime
 
 
@@ -242,6 +249,40 @@ class ExportRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# On-demand recommendations
+# ---------------------------------------------------------------------------
+
+class RecommendationRequest(BaseModel):
+    message_id: str
+    session_id: str
+
+
+class RecommendationResponse(BaseModel):
+    recommendations: List[Recommendation] = []
+
+
+# ---------------------------------------------------------------------------
+# Message feedback
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    rating: str  # "up" | "down"
+
+
+class FeedbackResponse(BaseModel):
+    status: str = "ok"
+
+
+# ---------------------------------------------------------------------------
+# Conversation management
+# ---------------------------------------------------------------------------
+
+class ConversationRenameRequest(BaseModel):
+    title: str
+
+
+# ---------------------------------------------------------------------------
 # Data profiling
 # ---------------------------------------------------------------------------
 
@@ -270,3 +311,30 @@ class TableProfile(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "0.2.0"
+
+
+# ---------------------------------------------------------------------------
+# Dashboards
+# ---------------------------------------------------------------------------
+
+class DashboardWidget(BaseModel):
+    id: str
+    type: str  # kpi | bar | line | area | pie | table | insight
+    title: str
+    data: Any = None
+    config: Dict[str, Any] = {}
+
+
+class DashboardGenerateRequest(BaseModel):
+    prompt: str
+    datasource_id: Optional[str] = None
+
+
+class DashboardOut(BaseModel):
+    id: str
+    title: str
+    datasource_id: Optional[str] = None
+    prompt: Optional[str] = None
+    widgets: List[DashboardWidget] = []
+    created_at: datetime.datetime
+    updated_at: datetime.datetime

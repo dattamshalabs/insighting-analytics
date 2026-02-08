@@ -1,6 +1,6 @@
 # Setup Guide
 
-Step-by-step instructions to get Insighting Analytics running on a Linux server.
+Step-by-step instructions to get Insighting Analytics running locally or on a Linux server.
 
 ---
 
@@ -12,11 +12,43 @@ Step-by-step instructions to get Insighting Analytics running on a Linux server.
 | Node.js | 18+ | `node --version` |
 | npm | 9+ | `npm --version` |
 | Git | any | `git --version` |
-| PostgreSQL | access to any PG instance (local, RDS, etc.) | `psql --version` |
 
 ---
 
-## First-Time Setup (Linux Server)
+## Quick Start
+
+The fastest way to get running — `start.sh` handles venv creation, dependency installation, and launching both services:
+
+```bash
+git clone https://github.com/dattamshalabs/insighting-analytics.git
+cd insighting-analytics
+
+# Configure backend environment (see "Configure environment" below)
+cp backend/.env.example backend/.env
+nano backend/.env
+
+# Configure frontend environment
+cp frontend/.env.example frontend/.env.local
+
+# Start everything
+./start.sh
+```
+
+Services will be available at:
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
+
+**Login credentials:** `admin` / `admin123`
+
+To stop all services:
+```bash
+./stop.sh
+```
+
+---
+
+## First-Time Setup (Manual / Linux Server)
 
 ### 1. Install prerequisites
 
@@ -59,7 +91,7 @@ Edit `backend/.env` with your actual values:
 ```ini
 # === REQUIRED ===
 
-# PostgreSQL — the database you want to query
+# Default PostgreSQL datasource (you can also add datasources via the UI)
 PG_HOST=your-postgres-host.example.com
 PG_PORT=5432
 PG_DATABASE=your_database
@@ -110,15 +142,24 @@ You should see `Compiled successfully` and a route table.
 
 ### 7. Start and verify
 
+**Recommended — use the start/stop scripts:**
+
+```bash
+cd /path/to/insighting-analytics
+./start.sh     # Starts backend + frontend (creates venv/installs deps if needed)
+./stop.sh      # Stops all services
+```
+
+**Manual start:**
+
 ```bash
 # Start backend
-cd ../backend
-source .venv/bin/activate
+cd backend && source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 
 # Start frontend
 cd ../frontend
-npm start &
+npm run dev &
 ```
 
 | Check | Command / URL | Expected |
@@ -135,54 +176,68 @@ npm start &
 
 ```bash
 cd /path/to/insighting-analytics
-
-# Start backend
-cd backend
-source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-
-# Start frontend
-cd ../frontend
-npm start &
+./start.sh
 ```
 
-Or use the included script:
-
-```bash
-cd /path/to/insighting-analytics
-./scripts/run_dev.sh
-```
-
-### Persistent service (survives SSH disconnect)
-
-```bash
-cd /path/to/insighting-analytics
-
-nohup bash -c 'cd backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000' > backend.log 2>&1 &
-nohup bash -c 'cd frontend && npm start' > frontend.log 2>&1 &
-```
+The script automatically:
+- Stops any previously running instances
+- Creates the Python venv if it doesn't exist
+- Installs dependencies if not already installed
+- Starts backend (port 8000) and frontend (port 3000)
+- Writes PIDs to `.pids` for clean shutdown
 
 To stop:
-
 ```bash
-# Find and kill processes
-lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill
-lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill
+./stop.sh
+```
+
+**Logs:**
+```bash
+tail -f backend.log     # Backend logs
+tail -f frontend.log    # Frontend logs
 ```
 
 ---
 
 ## Connect a Datasource
 
-**Option A — via `.env` (default datasource):**
+Insighting Analytics supports multiple database types via pre-built connectors:
+
+| Connector | How to Connect |
+|---|---|
+| **PostgreSQL** | Host, port, database, username, password |
+| **MySQL** | Host, port, database, username, password |
+| **MS SQL Server** | Host, port, database, username, password |
+| **Databricks** | Host, HTTP path, catalog, access token |
+| **CSV file** | Upload `.csv` file directly |
+| **Excel file** | Upload `.xlsx` file directly |
+
+**Option A — via `.env` (default PostgreSQL datasource):**
 The PG credentials in `backend/.env` are used as the default datasource.
 
-**Option B — via the UI (multiple datasources):**
+**Option B — via the UI (recommended for multiple datasources):**
 1. Go to http://localhost:3000/datasources
-2. Click "Add Datasource"
-3. Fill in the connection details
+2. Select the database type (PostgreSQL, MySQL, SQL Server, Databricks, CSV, or Excel)
+3. Fill in the connection details or upload a file
 4. Click "Connect"
 5. The schema will be auto-introspected
+
+---
+
+## Features
+
+- **Natural language analytics** — ask questions about your data in plain English
+- **Multi-database support** — PostgreSQL, MySQL, MSSQL, Databricks, CSV, Excel
+- **AI dashboards** — generate dashboards with KPI cards, charts, and AI insights from your datasets
+- **On-demand recommendations** — click "Get AI Recommendations" on any response for business insights
+- **Statistical analysis** — significance tests, time series analysis, data profiling
+- **Data quality reports** — automated data quality scoring with issue detection
+- **Message feedback** — thumbs up/down on responses for quality tracking
+- **Conversation management** — search, rename, delete chat sessions
+- **Export** — download conversations as CSV or PDF
+- **Business glossary** — define terms so the AI understands your domain
+- **Scheduled alerts** — set up SQL-based alerts with cron schedules
+- **Schema introspection** — auto-discovers tables, columns, types, and relationships
 
 ---
 
@@ -196,9 +251,9 @@ python --version   # must show 3.9, 3.10, or 3.11
 Recreate the venv with `python3.11 -m venv .venv`.
 
 ### `Backend starts but chat returns errors`
-- Check that `backend/.env` has valid PostgreSQL credentials
+- Check that `backend/.env` has valid database credentials
 - Check that the Ollama Cloud URL and API token are correct
-- Check the terminal for error logs
+- Check `backend.log` for error details
 
 ### `Frontend shows "Failed to fetch"` or CORS errors
 - Make sure the backend is running on port 8000
@@ -219,6 +274,8 @@ cd frontend && npm install
 
 ### Port already in use
 ```bash
-lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill
-lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill
+./stop.sh
+# Or manually:
+lsof -ti :8000 | xargs kill 2>/dev/null
+lsof -ti :3000 | xargs kill 2>/dev/null
 ```

@@ -55,6 +55,7 @@ export interface Message {
   data_quality?: DataQualityReport;
   stats?: StatResult;
   created_at: string;
+  feedback?: "up" | "down" | null;
 }
 
 export interface Conversation {
@@ -70,20 +71,28 @@ export interface ConversationDetail extends Conversation {
 }
 
 // Datasources
+export type DatabaseType = "postgresql" | "mysql" | "mssql" | "databricks" | "csv" | "excel";
+
 export interface Datasource {
   id: string;
   name: string;
-  host: string;
-  port: number;
-  database: string;
-  username: string;
+  db_type: DatabaseType;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
   ssl_mode: string;
   is_default: boolean;
   created_at: string;
+  file_path?: string;
+  // Databricks-specific
+  http_path?: string;
+  catalog?: string;
 }
 
 export interface DatasourceCreate {
   name: string;
+  db_type: DatabaseType;
   host: string;
   port: number;
   database: string;
@@ -91,6 +100,10 @@ export interface DatasourceCreate {
   password: string;
   ssl_mode: string;
   is_default: boolean;
+  // Databricks-specific
+  http_path?: string;
+  catalog?: string;
+  access_token?: string;
 }
 
 // Schema

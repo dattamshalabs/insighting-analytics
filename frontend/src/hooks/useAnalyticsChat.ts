@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
-import type { ChatResponse, Conversation, Message } from "@/types";
+import type { ChatResponse, Conversation, Message, Recommendation } from "@/types";
 
 export function useAnalyticsChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -15,7 +15,7 @@ export function useAnalyticsChat() {
   const loadSessions = useCallback(async () => {
     try {
       const all = await api.getSessions();
-      setSessions(all.slice(0, 10));
+      setSessions(all.slice(0, 30));
     } catch {
       // silently fail — sessions sidebar is non-critical
     }
@@ -48,6 +48,7 @@ export function useAnalyticsChat() {
           role: "assistant",
           content: resp.answer,
           generated_sql: resp.generated_sql,
+          generated_code: resp.generated_code,
           chart_url: resp.chart_url,
           recommendations: resp.recommendations,
           data_quality: resp.data_quality,
@@ -87,5 +88,84 @@ export function useAnalyticsChat() {
     loadSessions();
   }, [loadSessions]);
 
-  return { messages, sessionId, loading, error, sessions, send, loadSession, loadSessions, reset };
+  // On-demand recommendations
+  const fetchRecommendations = useCallback(
+    async (messageId: string): Promise<Recommendation[]> => {
+      if (!sessionId) return [];
+      try {
+        const resp = await api.getRecommendations(messageId, sessionId);
+        // Update the message in state with the new recommendations
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, recommendations: resp.recommendations } : m
+          )
+        );
+        return resp.recommendations;
+      } catch {
+        return [];
+      }
+    },
+    [sessionId]
+  );
+
+  // Message feedback
+  const submitFeedback = useCallback(
+    async (messageId: string, rating: "up" | "down") => {
+      try {
+        await api.submitFeedback(messageId, rating);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, feedback: rating } : m
+          )
+        );
+      } catch {
+        // silently fail
+      }
+    },
+    []
+  );
+
+  // Conversation management
+  const deleteSession = useCallback(
+    async (sid: string) => {
+      try {
+        await api.deleteSession(sid);
+        if (sid === sessionId) {
+          reset();
+        }
+        loadSessions();
+      } catch {
+        // silently fail
+      }
+    },
+    [sessionId, reset, loadSessions]
+  );
+
+  const renameSession = useCallback(
+    async (sid: string, title: string) => {
+      try {
+        await api.renameSession(sid, title);
+        loadSessions();
+      } catch {
+        // silently fail
+      }
+    },
+    [loadSessions]
+  );
+
+  return {
+    messages,
+    sessionId,
+    loading,
+    error,
+    sessions,
+    send,
+    loadSession,
+    loadSessions,
+    reset,
+    fetchRecommendations,
+    submitFeedback,
+    deleteSession,
+    renameSession,
+  };
 }

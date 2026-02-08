@@ -39,6 +39,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 from app.api.admin import router as admin_router
 from app.api.alerts import router as alerts_router
 from app.api.chat import router as chat_router
+from app.api.dashboards import router as dashboards_router
 from app.api.datasources import router as datasources_router
 from app.api.exports import router as exports_router
 from app.api.glossary import router as glossary_router
@@ -48,6 +49,7 @@ from app.api.schema import router as schema_router
 app.include_router(health_router)
 app.include_router(chat_router)
 app.include_router(datasources_router)
+app.include_router(dashboards_router)
 app.include_router(schema_router)
 app.include_router(exports_router)
 app.include_router(alerts_router)

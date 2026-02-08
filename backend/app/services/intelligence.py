@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.guardrails import mask_pii
+from app.models.orm import Datasource
 from app.models.schemas import (
     ChatResponse,
     DataQualityReport,
@@ -27,6 +28,7 @@ from app.services import data_quality as dq_svc
 from app.services import observability as obs_svc
 from app.services import recommendation as rec_svc
 from app.services import schema_registry
+from app.services.db_engine import build_connection_string, get_default_schema
 
 logger = logging.getLogger(__name__)
 
@@ -61,28 +63,113 @@ def _build_llm():
     )
 
 
-def _load_dataframes(
-    host: Optional[str] = None,
-    port: Optional[int] = None,
-    database: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-) -> List[pd.DataFrame]:
-    """Load all tables from PostgreSQL as DataFrames."""
-    pwd = password if password is not None else (settings.pg_password or "")
-    h = host or settings.pg_host
-    p = port or settings.pg_port
-    db = database or settings.pg_database
-    u = username or settings.pg_username
+def _decrypt_password(encrypted: str) -> str:
+    """Decrypt a datasource password."""
+    if not settings.encryption_key or not encrypted:
+        return encrypted or ""
+    from cryptography.fernet import Fernet
+    f = Fernet(settings.encryption_key.encode())
+    return f.decrypt(encrypted.encode()).decode()
 
+
+def _load_dataframes_from_datasource(ds: Datasource) -> List[pd.DataFrame]:
+    """Load DataFrames from a specific datasource."""
+    db_type = ds.db_type or "postgresql"
+
+    # File-based datasources
+    if db_type == "csv":
+        if not ds.file_path:
+            return []
+        try:
+            df = pd.read_csv(ds.file_path)
+            df.name = Path(ds.file_path).stem
+            logger.info("Loaded CSV '%s': %d rows, %d cols", ds.file_path, len(df), len(df.columns))
+            return [df]
+        except Exception as e:
+            logger.warning("Failed to load CSV '%s': %s", ds.file_path, e)
+            return []
+
+    if db_type == "excel":
+        if not ds.file_path:
+            return []
+        try:
+            xls = pd.ExcelFile(ds.file_path)
+            dfs = []
+            for sheet in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet)
+                df.name = sheet
+                dfs.append(df)
+                logger.info("Loaded Excel sheet '%s': %d rows, %d cols", sheet, len(df), len(df.columns))
+            return dfs
+        except Exception as e:
+            logger.warning("Failed to load Excel '%s': %s", ds.file_path, e)
+            return []
+
+    # Database-backed datasources
+    pwd = _decrypt_password(ds.encrypted_password) if ds.encrypted_password else ""
+    conn_str = build_connection_string(
+        db_type=db_type,
+        host=ds.host,
+        port=ds.port,
+        database=ds.database,
+        username=ds.username,
+        password=pwd,
+        ssl_mode=ds.ssl_mode or "disable",
+        http_path=ds.http_path,
+        catalog=ds.catalog,
+        access_token=_decrypt_password(ds.access_token) if ds.access_token else None,
+    )
+
+    engine = create_engine(conn_str, pool_pre_ping=True)
+    schema_name = get_default_schema(db_type) or None
+
+    # Get table names
+    with engine.connect() as conn:
+        if db_type == "postgresql":
+            result = conn.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+            ))
+        elif db_type == "mysql":
+            result = conn.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+            ))
+        elif db_type == "mssql":
+            result = conn.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'dbo' AND table_type = 'BASE TABLE'"
+            ))
+        else:
+            result = conn.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_type = 'BASE TABLE'"
+            ))
+        table_names = [row[0] for row in result]
+
+    dfs = []
+    for table_name in table_names:
+        try:
+            df = pd.read_sql_table(table_name, engine, schema=schema_name)
+            df.name = table_name
+            dfs.append(df)
+            logger.info("Loaded table '%s': %d rows, %d cols", table_name, len(df), len(df.columns))
+        except Exception as e:
+            logger.warning("Failed to load table '%s': %s", table_name, e)
+
+    return dfs
+
+
+def _load_dataframes_default() -> List[pd.DataFrame]:
+    """Load all tables from the default PostgreSQL datasource (env vars)."""
+    pwd = settings.pg_password or ""
     if pwd:
-        conn_str = f"postgresql://{u}:{pwd}@{h}:{p}/{db}"
+        conn_str = f"postgresql://{settings.pg_username}:{pwd}@{settings.pg_host}:{settings.pg_port}/{settings.pg_database}"
     else:
-        conn_str = f"postgresql://{u}@{h}:{p}/{db}"
+        conn_str = f"postgresql://{settings.pg_username}@{settings.pg_host}:{settings.pg_port}/{settings.pg_database}"
 
     engine = create_engine(conn_str, pool_pre_ping=True)
 
-    # Get all table names
     with engine.connect() as conn:
         result = conn.execute(text(
             "SELECT table_name FROM information_schema.tables "
@@ -94,7 +181,7 @@ def _load_dataframes(
     for table_name in table_names:
         try:
             df = pd.read_sql_table(table_name, engine, schema="public")
-            df.name = table_name  # PandasAI uses this to identify tables
+            df.name = table_name
             dfs.append(df)
             logger.info("Loaded table '%s': %d rows, %d cols", table_name, len(df), len(df.columns))
         except Exception as e:
@@ -142,9 +229,18 @@ async def process_query(
     glossary_rows = db.query(GlossaryTerm).all()
     glossary_terms = [{"term": g.term, "sql_expression": g.sql_expression} for g in glossary_rows]
 
-    # 4. Build LLM + load DataFrames from PG
+    # 4. Build LLM + load DataFrames from specified datasource or defaults
     llm = _build_llm()
-    dfs = _load_dataframes()
+
+    if datasource_id:
+        ds = db.query(Datasource).filter(Datasource.id == datasource_id).first()
+        if ds:
+            dfs = _load_dataframes_from_datasource(ds)
+        else:
+            dfs = _load_dataframes_default()
+    else:
+        dfs = _load_dataframes_default()
+
     chart_dir = Path(settings.chart_output_dir)
     chart_dir.mkdir(parents=True, exist_ok=True)
 
@@ -211,16 +307,8 @@ async def process_query(
     except Exception as e:
         logger.warning("Data quality check failed: %s", e)
 
-    # 9. Recommendations
+    # 9. Recommendations — now generated on-demand via /chat/recommendations
     recommendations: list[Recommendation] = []
-    try:
-        recommendations = await rec_svc.generate_recommendations(
-            analysis_text=answer,
-            query=query,
-            generated_sql=generated_sql,
-        )
-    except Exception as e:
-        logger.warning("Recommendation generation failed: %s", e)
 
     # 10. Log
     obs_svc.log_llm_call(

@@ -16,16 +16,20 @@ export function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
     >
       <span
         className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
-          checked ? "bg-blue-600" : "bg-gray-600"
+          checked ? "bg-brand-500" : "bg-surface-500"
         }`}
       >
         <span
-          className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 mt-0.5 ${
+          className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 mt-0.5 ${
             checked ? "translate-x-4 ml-0.5" : "translate-x-0.5"
           }`}
         />
       </span>
-      {label && <span className="text-sm text-gray-300 group-hover:text-gray-100">{label}</span>}
+      {label && (
+        <span className="text-sm text-zinc-400 group-hover:text-zinc-200 transition-colors">
+          {label}
+        </span>
+      )}
     </button>
   );
 }

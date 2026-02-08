@@ -92,3 +92,34 @@ def list_conversations(db: Session, limit: int = 50) -> List[Conversation]:
 
 def get_conversation_with_messages(db: Session, conversation_id: str) -> Optional[Conversation]:
     return db.query(Conversation).filter(Conversation.id == conversation_id).first()
+
+
+def rename_conversation(db: Session, conversation_id: str, title: str) -> Optional[Conversation]:
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if conv:
+        conv.title = title
+        db.commit()
+        db.refresh(conv)
+    return conv
+
+
+def delete_conversation(db: Session, conversation_id: str) -> bool:
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        return False
+    db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+    db.delete(conv)
+    db.commit()
+    return True
+
+
+def get_message(db: Session, message_id: str) -> Optional[Message]:
+    return db.query(Message).filter(Message.id == message_id).first()
+
+
+def update_message_recommendations(db: Session, message_id: str, recommendations: list) -> None:
+    import json
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if msg:
+        msg.recommendations_json = json.dumps(recommendations)
+        db.commit()

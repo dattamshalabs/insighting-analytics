@@ -7,7 +7,7 @@ export interface ChartableData {
   valueKeys: string[];
 }
 
-const CHART_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+const CHART_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899"];
 
 export function getChartColors() {
   return CHART_COLORS;

@@ -4,7 +4,7 @@ interface SkeletonProps {
 }
 
 function SkeletonLine({ width }: { width: string }) {
-  return <div className={`h-3 rounded bg-gray-700/50 animate-shimmer ${width}`} />;
+  return <div className={`h-3 rounded-lg bg-white/[0.04] animate-shimmer ${width}`} />;
 }
 
 export function Skeleton({ variant = "lines", count = 3 }: SkeletonProps) {
@@ -13,7 +13,7 @@ export function Skeleton({ variant = "lines", count = 3 }: SkeletonProps) {
       <div className="space-y-4">
         {Array.from({ length: count }).map((_, i) => (
           <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
-            <div className={`rounded-xl p-4 space-y-2 ${i % 2 === 0 ? "bg-blue-600/20 w-48" : "glass-card w-72"}`}>
+            <div className={`rounded-xl p-4 space-y-2 ${i % 2 === 0 ? "bg-brand-500/10 w-48" : "glass-card w-72"}`}>
               <SkeletonLine width="w-full" />
               <SkeletonLine width="w-3/4" />
             </div>

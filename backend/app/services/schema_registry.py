@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from sqlalchemy import create_engine, inspect, text
 
 from app.core.config import settings
 from app.models.schemas import ColumnInfo, InferredRelation, SchemaMap, TableInfo
+from app.services.db_engine import get_default_schema, get_row_count_query
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +22,25 @@ def _get_engine(connection_string: str):
     return create_engine(connection_string, pool_pre_ping=True)
 
 
-def introspect(datasource_id: str, connection_string: str) -> SchemaMap:
-    """Introspect a PostgreSQL datasource and cache the schema map."""
+def introspect(datasource_id: str, connection_string: str, db_type: str = "postgresql") -> SchemaMap:
+    """Introspect a datasource and cache the schema map."""
     engine = _get_engine(connection_string)
     inspector = inspect(engine)
+    schema_name = get_default_schema(db_type) or None
 
     tables: List[TableInfo] = []
     all_columns: Dict[str, List[ColumnInfo]] = {}
     explicit_relations: List[InferredRelation] = []
 
-    for table_name in inspector.get_table_names(schema="public"):
-        pk_cols = set(inspector.get_pk_constraint(table_name, schema="public").get("constrained_columns", []))
+    # For MySQL, schema_name is None (uses current database)
+    inspect_schema = schema_name if schema_name else None
+
+    for table_name in inspector.get_table_names(schema=inspect_schema):
+        pk_constraint = inspector.get_pk_constraint(table_name, schema=inspect_schema)
+        pk_cols = set(pk_constraint.get("constrained_columns", []) if pk_constraint else [])
         columns: List[ColumnInfo] = []
 
-        for col in inspector.get_columns(table_name, schema="public"):
+        for col in inspector.get_columns(table_name, schema=inspect_schema):
             columns.append(ColumnInfo(
                 name=col["name"],
                 data_type=str(col["type"]),
@@ -43,40 +49,41 @@ def introspect(datasource_id: str, connection_string: str) -> SchemaMap:
             ))
 
         # Explicit FK relations
-        for fk in inspector.get_foreign_keys(table_name, schema="public"):
-            ref_table = fk["referred_table"]
-            for local_col, remote_col in zip(fk["constrained_columns"], fk["referred_columns"]):
-                # Mark column
-                for c in columns:
-                    if c.name == local_col:
-                        c.is_foreign_key = True
-                        c.references = f"{ref_table}.{remote_col}"
-                explicit_relations.append(InferredRelation(
-                    from_table=table_name,
-                    from_column=local_col,
-                    to_table=ref_table,
-                    to_column=remote_col,
-                    confidence=1.0,
-                    relation_type="explicit",
-                ))
+        try:
+            for fk in inspector.get_foreign_keys(table_name, schema=inspect_schema):
+                ref_table = fk["referred_table"]
+                for local_col, remote_col in zip(fk["constrained_columns"], fk["referred_columns"]):
+                    for c in columns:
+                        if c.name == local_col:
+                            c.is_foreign_key = True
+                            c.references = f"{ref_table}.{remote_col}"
+                    explicit_relations.append(InferredRelation(
+                        from_table=table_name,
+                        from_column=local_col,
+                        to_table=ref_table,
+                        to_column=remote_col,
+                        confidence=1.0,
+                        relation_type="explicit",
+                    ))
+        except Exception:
+            pass  # Some databases may not support FK introspection
 
         # Row count (fast estimate)
         row_count = None
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(
-                    text(f"SELECT reltuples::bigint FROM pg_class WHERE relname = :t"),
-                    {"t": table_name},
-                )
-                row = result.fetchone()
-                if row:
-                    row_count = max(int(row[0]), 0)
-        except Exception:
-            pass
+        count_query = get_row_count_query(db_type, table_name)
+        if count_query:
+            try:
+                with engine.connect() as conn:
+                    result = conn.execute(text(count_query))
+                    row = result.fetchone()
+                    if row:
+                        row_count = max(int(row[0]), 0)
+            except Exception:
+                pass
 
         tables.append(TableInfo(
             name=table_name,
-            schema_name="public",
+            schema_name=schema_name or "default",
             row_count=row_count,
             columns=columns,
         ))
@@ -91,8 +98,8 @@ def introspect(datasource_id: str, connection_string: str) -> SchemaMap:
         relations=explicit_relations + inferred,
     )
     _registry[datasource_id] = schema_map
-    logger.info("Schema introspected for datasource %s: %d tables, %d relations",
-                datasource_id, len(tables), len(schema_map.relations))
+    logger.info("Schema introspected for datasource %s (%s): %d tables, %d relations",
+                datasource_id, db_type, len(tables), len(schema_map.relations))
     return schema_map
 
 
@@ -105,17 +112,14 @@ def _infer_relations(
     inferred: List[InferredRelation] = []
 
     table_names = list(all_columns.keys())
-    # Build lookup: table -> set of column names
     col_lookup = {t: {c.name for c in cols} for t, cols in all_columns.items()}
 
     for table_a in table_names:
         for col in all_columns[table_a]:
-            # Pattern: <other_table>_id or <other_table>Id
             match = re.match(r"^(.+?)_id$", col.name, re.IGNORECASE)
             if not match:
                 continue
             candidate = match.group(1).lower()
-            # Look for a table whose name matches candidate (singular or plural)
             for table_b in table_names:
                 if table_b == table_a:
                     continue
