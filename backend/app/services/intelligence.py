@@ -6,8 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 import pandas as pd
-from openai import OpenAI
 from pandasai import SmartDatalake
 from pandasai.llm.base import LLM
 from sqlalchemy import create_engine, text
@@ -34,11 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaCloudLLM(LLM):
-    """PandasAI v3-compatible LLM that calls Ollama Cloud via OpenAI client."""
+    """PandasAI v3-compatible LLM that calls Ollama Cloud via native API."""
 
-    def __init__(self, api_base: str, model: str, api_key: str):
+    def __init__(self, api_base: str, model: str, api_token: str):
         self.model = model
-        self._client = OpenAI(base_url=api_base, api_key=api_key)
+        self._api_base = api_base.rstrip("/")
+        self._api_token = api_token
 
     @property
     def type(self) -> str:
@@ -47,19 +48,36 @@ class OllamaCloudLLM(LLM):
     def call(self, instruction, context=None) -> str:
         # instruction is a BasePrompt object in PandasAI v3
         prompt = instruction.to_string() if hasattr(instruction, "to_string") else str(instruction)
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.choices[0].message.content or ""
+
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+
+        headers = {"Content-Type": "application/json"}
+        if self._api_token:
+            headers["Authorization"] = f"Bearer {self._api_token}"
+
+        # Use synchronous httpx client for PandasAI compatibility
+        with httpx.Client(timeout=120) as client:
+            resp = client.post(
+                f"{self._api_base}/api/chat",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        return data.get("message", {}).get("content", "")
 
 
 def _build_llm():
     """Build an Ollama Cloud-backed LLM for PandasAI."""
     return OllamaCloudLLM(
-        api_base=f"{settings.ollama_base_url}/v1",
+        api_base=settings.ollama_base_url,
         model=settings.ollama_model,
-        api_key=settings.ollama_api_token or "dummy",
+        api_token=settings.ollama_api_token or "",
     )
 
 

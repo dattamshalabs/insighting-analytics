@@ -23,8 +23,8 @@ import { ThoughtProcess } from "@/components/chat/ThoughtProcess";
 import { ExportMenu } from "@/components/export/ExportMenu";
 import { ChatHistory } from "@/components/ui/ChatHistory";
 import { useAnalyticsChat } from "@/hooks/useAnalyticsChat";
-
 import { api } from "@/lib/api";
+
 import type { SuggestedQuestion } from "@/types";
 
 const FALLBACK_PROMPTS = [
