@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -12,6 +12,16 @@ engine = create_engine(
     connect_args={"check_same_thread": False},  # SQLite needs this
     echo=False,
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    """Configure SQLite for reliable writes on all filesystems (incl. exFAT)."""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=DELETE")
+    cursor.execute("PRAGMA synchronous=FULL")
+    cursor.execute("PRAGMA locking_mode=EXCLUSIVE")
+    cursor.close()
 
 SessionLocal = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
 

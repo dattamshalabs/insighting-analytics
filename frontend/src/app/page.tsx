@@ -24,7 +24,10 @@ import { ExportMenu } from "@/components/export/ExportMenu";
 import { ChatHistory } from "@/components/ui/ChatHistory";
 import { useAnalyticsChat } from "@/hooks/useAnalyticsChat";
 
-const SUGGESTED_PROMPTS = [
+import { api } from "@/lib/api";
+import type { SuggestedQuestion } from "@/types";
+
+const FALLBACK_PROMPTS = [
   {
     text: "Show me total revenue by month",
     icon: ChartBarIcon,
@@ -47,6 +50,22 @@ const SUGGESTED_PROMPTS = [
   },
 ];
 
+const ICON_MAP: Record<string, typeof ChartBarIcon> = {
+  chart: ChartBarIcon,
+  table: TableCellsIcon,
+  search: MagnifyingGlassIcon,
+  bolt: BoltIcon,
+};
+
+const COLOR_MAP: Record<string, string> = {
+  trend: "from-blue-500/20 to-blue-600/10",
+  comparison: "from-purple-500/20 to-purple-600/10",
+  distribution: "from-emerald-500/20 to-emerald-600/10",
+  ranking: "from-amber-500/20 to-amber-600/10",
+  anomaly: "from-red-500/20 to-red-600/10",
+  correlation: "from-cyan-500/20 to-cyan-600/10",
+};
+
 const messageVariants = {
   hidden: { opacity: 0, y: 12 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" as const } },
@@ -68,7 +87,47 @@ function TypingIndicator() {
   );
 }
 
+function PromptSkeleton() {
+  return (
+    <div className="glass-card p-4 animate-pulse">
+      <div className="w-8 h-8 rounded-lg bg-zinc-800 mb-3" />
+      <div className="h-3 bg-zinc-800 rounded w-3/4 mb-1.5" />
+      <div className="h-3 bg-zinc-800 rounded w-1/2" />
+    </div>
+  );
+}
+
 function EmptyState({ onSelect }: { onSelect: (text: string) => void }) {
+  const [prompts, setPrompts] = useState<{ text: string; icon: typeof ChartBarIcon; color: string }[]>([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSuggestedQuestions()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.questions && res.questions.length > 0) {
+          setPrompts(
+            res.questions.slice(0, 6).map((q) => ({
+              text: q.text,
+              icon: ICON_MAP[q.icon_hint] || ChartBarIcon,
+              color: COLOR_MAP[q.category] || "from-blue-500/20 to-blue-600/10",
+            }))
+          );
+        } else {
+          setPrompts(FALLBACK_PROMPTS);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPrompts(FALLBACK_PROMPTS);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPrompts(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="flex flex-col items-center justify-center h-full animate-fade-in px-4">
       {/* Animated gradient orb */}
@@ -87,21 +146,24 @@ function EmptyState({ onSelect }: { onSelect: (text: string) => void }) {
         and visualize the results.
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
-        {SUGGESTED_PROMPTS.map(({ text, icon: Icon, color }) => (
-          <button
-            key={text}
-            onClick={() => onSelect(text)}
-            className="glass-card-interactive group p-4 text-left"
-          >
-            <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${color} flex items-center justify-center mb-3 transition-transform group-hover:scale-110`}>
-              <Icon className="w-4 h-4 text-zinc-300" />
-            </div>
-            <p className="text-[13px] text-zinc-400 group-hover:text-zinc-200 transition-colors leading-snug">
-              {text}
-            </p>
-          </button>
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-2xl w-full">
+        {loadingPrompts
+          ? Array.from({ length: 4 }).map((_, i) => <PromptSkeleton key={i} />)
+          : prompts.map(({ text, icon: Icon, color }) => (
+              <button
+                key={text}
+                onClick={() => onSelect(text)}
+                className="glass-card-interactive group p-4 text-left"
+              >
+                <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${color} flex items-center justify-center mb-3 transition-transform group-hover:scale-110`}>
+                  <Icon className="w-4 h-4 text-zinc-300" />
+                </div>
+                <p className="text-[13px] text-zinc-400 group-hover:text-zinc-200 transition-colors leading-snug">
+                  {text}
+                </p>
+              </button>
+            ))
+        }
       </div>
     </div>
   );

@@ -1,12 +1,13 @@
-"""GET /admin/logs — observability dashboard data."""
+"""GET /admin/logs — observability dashboard data + SMTP config."""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.orm import LLMCallLog, QueryLog
-from app.models.schemas import LLMLogOut, QueryLogOut
+from app.models.orm import LLMCallLog, QueryLog, SmtpConfig
+from app.models.schemas import LLMLogOut, QueryLogOut, SmtpConfigCreate, SmtpConfigOut
 from app.services import cache as cache_svc
+from app.services import email_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -46,3 +47,74 @@ async def cache_stats():
 async def clear_cache():
     cache_svc.clear_all()
     return {"status": "cleared"}
+
+
+# ---------------------------------------------------------------------------
+# SMTP configuration
+# ---------------------------------------------------------------------------
+
+@router.get("/smtp", response_model=SmtpConfigOut | None)
+async def get_smtp_config(db: Session = Depends(get_db)):
+    """Get current SMTP configuration."""
+    cfg = db.query(SmtpConfig).first()
+    if not cfg:
+        return None
+    return SmtpConfigOut(
+        id=cfg.id, host=cfg.host, port=cfg.port,
+        username=cfg.username, from_email=cfg.from_email, use_tls=cfg.use_tls,
+    )
+
+
+@router.post("/smtp", response_model=SmtpConfigOut)
+async def save_smtp_config(body: SmtpConfigCreate, db: Session = Depends(get_db)):
+    """Create or update SMTP configuration."""
+    existing = db.query(SmtpConfig).first()
+
+    # Encrypt password if provided
+    encrypted_password = None
+    if body.password:
+        from app.core.config import settings
+        if settings.encryption_key:
+            from cryptography.fernet import Fernet
+            f = Fernet(settings.encryption_key.encode())
+            encrypted_password = f.encrypt(body.password.encode()).decode()
+        else:
+            encrypted_password = body.password
+
+    if existing:
+        existing.host = body.host
+        existing.port = body.port
+        existing.username = body.username
+        if encrypted_password is not None:
+            existing.encrypted_password = encrypted_password
+        existing.from_email = body.from_email
+        existing.use_tls = body.use_tls
+        db.commit()
+        db.refresh(existing)
+        cfg = existing
+    else:
+        cfg = SmtpConfig(
+            host=body.host,
+            port=body.port,
+            username=body.username,
+            encrypted_password=encrypted_password,
+            from_email=body.from_email,
+            use_tls=body.use_tls,
+        )
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+
+    return SmtpConfigOut(
+        id=cfg.id, host=cfg.host, port=cfg.port,
+        username=cfg.username, from_email=cfg.from_email, use_tls=cfg.use_tls,
+    )
+
+
+@router.post("/smtp/test")
+async def test_smtp(db: Session = Depends(get_db)):
+    """Test SMTP connection."""
+    result = email_service.test_smtp_connection(db)
+    if result["status"] == "error":
+        return result
+    return result

@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.schemas import DashboardGenerateRequest, DashboardOut
+from app.models.schemas import DashboardEmailRequest, DashboardGenerateRequest, DashboardOut
 from app.services import dashboard as dash_svc
+from app.services import email_service
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -42,3 +43,17 @@ async def delete_dashboard(dashboard_id: str, db: Session = Depends(get_db)):
     """Delete a dashboard."""
     if not dash_svc.delete_dashboard(db, dashboard_id):
         raise HTTPException(status_code=404, detail="Dashboard not found")
+
+
+@router.post("/email")
+async def send_dashboard_email(body: DashboardEmailRequest, db: Session = Depends(get_db)):
+    """Send a dashboard report via email."""
+    result = email_service.send_dashboard_email(
+        dashboard_id=body.dashboard_id,
+        recipient_emails=body.recipients,
+        db=db,
+        subject=body.subject,
+    )
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result

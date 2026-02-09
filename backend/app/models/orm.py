@@ -190,3 +190,20 @@ class Dashboard(Base):
     widgets_json = Column(Text, nullable=False, default="[]")  # JSON array of widget configs
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+# ---------------------------------------------------------------------------
+# SMTP configuration
+# ---------------------------------------------------------------------------
+
+class SmtpConfig(Base):
+    __tablename__ = "smtp_config"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    host = Column(String, nullable=False)
+    port = Column(Integer, default=587)
+    username = Column(String, nullable=True)
+    encrypted_password = Column(String, nullable=True)
+    from_email = Column(String, nullable=False)
+    use_tls = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)

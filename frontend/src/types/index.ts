@@ -177,6 +177,36 @@ export interface GlossaryTermCreate {
   description?: string;
 }
 
+// Suggested questions (dynamic)
+export interface SuggestedQuestion {
+  text: string;
+  category: "trend" | "comparison" | "distribution" | "ranking" | "anomaly" | "correlation";
+  icon_hint: "chart" | "table" | "search" | "bolt";
+}
+
+export interface SuggestedQuestionsResponse {
+  questions: SuggestedQuestion[];
+}
+
+// SMTP Configuration
+export interface SmtpConfig {
+  id: string;
+  host: string;
+  port: number;
+  username?: string;
+  from_email: string;
+  use_tls: boolean;
+}
+
+export interface SmtpConfigCreate {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  from_email: string;
+  use_tls: boolean;
+}
+
 // Admin / Observability
 export interface LLMLog {
   id: string;

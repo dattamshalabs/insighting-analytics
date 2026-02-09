@@ -255,8 +255,7 @@ async def process_query(
         dfs,
         config={
             "llm": llm,
-            "save_charts": True,
-            "save_charts_path": str(chart_dir),
+            "save_charts": False,
             "verbose": False,
             "enable_cache": False,
         },
@@ -290,11 +289,22 @@ async def process_query(
     except Exception:
         pass
 
-    # Check for chart
-    charts = list(chart_dir.glob("*.png"))
-    if charts:
-        latest_chart = max(charts, key=lambda p: p.stat().st_mtime)
-        chart_url = f"/static/charts/{latest_chart.name}"
+    # Check for chart — PandasAI saves temp charts to {project_root}/exports/charts/
+    import shutil
+    pandasai_chart_dir = Path("exports/charts")
+    if pandasai_chart_dir.exists():
+        temp_charts = list(pandasai_chart_dir.glob("*.png"))
+        if temp_charts:
+            latest = max(temp_charts, key=lambda p: p.stat().st_mtime)
+            dest = chart_dir / latest.name
+            shutil.copy2(str(latest), str(dest))
+            chart_url = f"/static/charts/{latest.name}"
+    # Also check our own chart dir
+    if not chart_url:
+        charts = list(chart_dir.glob("*.png"))
+        if charts:
+            latest_chart = max(charts, key=lambda p: p.stat().st_mtime)
+            chart_url = f"/static/charts/{latest_chart.name}"
 
     # 7. PII masking
     answer = mask_pii(answer)

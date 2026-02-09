@@ -338,3 +338,45 @@ class DashboardOut(BaseModel):
     widgets: List[DashboardWidget] = []
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+# ---------------------------------------------------------------------------
+# Suggested questions (dynamic)
+# ---------------------------------------------------------------------------
+
+class SuggestedQuestion(BaseModel):
+    text: str
+    category: str  # trend | comparison | distribution | ranking | anomaly | correlation
+    icon_hint: str  # chart | table | search | bolt
+
+
+class SuggestedQuestionsResponse(BaseModel):
+    questions: List[SuggestedQuestion] = []
+
+
+# ---------------------------------------------------------------------------
+# SMTP configuration
+# ---------------------------------------------------------------------------
+
+class SmtpConfigCreate(BaseModel):
+    host: str
+    port: int = 587
+    username: Optional[str] = None
+    password: Optional[str] = None
+    from_email: str
+    use_tls: bool = True
+
+
+class SmtpConfigOut(BaseModel):
+    id: str
+    host: str
+    port: int
+    username: Optional[str] = None
+    from_email: str
+    use_tls: bool
+
+
+class DashboardEmailRequest(BaseModel):
+    dashboard_id: str
+    recipients: List[str]
+    subject: Optional[str] = None

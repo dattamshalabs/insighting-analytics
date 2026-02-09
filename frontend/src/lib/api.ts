@@ -30,6 +30,9 @@ import type {
   QueryLog,
   Recommendation,
   SchemaMap,
+  SmtpConfig,
+  SmtpConfigCreate,
+  SuggestedQuestionsResponse,
 } from "@/types";
 
 export const api = {
@@ -105,6 +108,11 @@ export const api = {
   getSchema: (datasourceId: string) =>
     request<SchemaMap>(`/schema/${datasourceId}`),
 
+  getSuggestedQuestions: (datasourceId?: string) => {
+    const qs = datasourceId ? `?datasource_id=${datasourceId}` : "";
+    return request<SuggestedQuestionsResponse>(`/schema/suggested-questions${qs}`);
+  },
+
   // Export
   exportConversation: (conversationId: string, format: "csv" | "pdf") =>
     `${API_URL}/export/${conversationId}?format=${format}`,
@@ -171,6 +179,26 @@ export const api = {
 
   deleteDashboard: (id: string) =>
     request<void>(`/dashboards/${id}`, { method: "DELETE" }),
+
+  sendDashboardEmail: (dashboardId: string, recipients: string[], subject?: string) =>
+    request<{ status: string; message: string }>("/dashboards/email", {
+      method: "POST",
+      body: JSON.stringify({ dashboard_id: dashboardId, recipients, subject }),
+    }),
+
+  // SMTP
+  getSmtpConfig: () => request<SmtpConfig | null>("/admin/smtp"),
+
+  saveSmtpConfig: (data: SmtpConfigCreate) =>
+    request<SmtpConfig>("/admin/smtp", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  testSmtpConnection: () =>
+    request<{ status: string; message: string }>("/admin/smtp/test", {
+      method: "POST",
+    }),
 };
 
 // Dashboard types

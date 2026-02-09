@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Fragment } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChartBarSquareIcon,
@@ -11,6 +11,8 @@ import {
   PresentationChartBarIcon,
   ArrowTrendingUpIcon,
   TrashIcon,
+  EnvelopeIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
   Bar,
@@ -62,7 +64,7 @@ interface WidgetData {
 
 function KPICard({ widget }: { widget: DashboardResponse["widgets"][0] }) {
   const data = widget.data as WidgetData | null;
-  const value = data?.value ?? "—";
+  const value = data?.value ?? "\u2014";
   const change = typeof data?.change === "number" ? data.change : null;
 
   return (
@@ -171,7 +173,7 @@ function TableWidget({ widget }: { widget: DashboardResponse["widgets"][0] }) {
   const rows = data?.rows || [];
 
   return (
-    <div className="glass-card p-5 col-span-2">
+    <div className="glass-card p-5 col-span-full">
       <h3 className="text-sm font-medium text-zinc-300 mb-4">{widget.title}</h3>
       <div className="overflow-auto max-h-60">
         <table className="w-full text-xs">
@@ -197,19 +199,153 @@ function TableWidget({ widget }: { widget: DashboardResponse["widgets"][0] }) {
   );
 }
 
+/* ---------- Lightweight Markdown Renderer ---------- */
+function renderMarkdown(text: string) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let listItems: { type: "ul" | "ol"; items: React.ReactNode[] } | null = null;
+
+  const flushList = () => {
+    if (listItems) {
+      if (listItems.type === "ul") {
+        elements.push(
+          <ul key={`list-${elements.length}`} className="list-disc list-inside space-y-1 my-2 text-zinc-400">
+            {listItems.items.map((item, i) => <li key={i}>{item}</li>)}
+          </ul>
+        );
+      } else {
+        elements.push(
+          <ol key={`list-${elements.length}`} className="list-decimal list-inside space-y-1 my-2 text-zinc-400">
+            {listItems.items.map((item, i) => <li key={i}>{item}</li>)}
+          </ol>
+        );
+      }
+      listItems = null;
+    }
+  };
+
+  const formatInline = (s: string): React.ReactNode => {
+    // Process **bold** and *italic*
+    const parts: React.ReactNode[] = [];
+    let remaining = s;
+    let key = 0;
+
+    while (remaining.length > 0) {
+      // Bold
+      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+      // Italic
+      const italicMatch = remaining.match(/\*(.+?)\*/);
+
+      const match = boldMatch && italicMatch
+        ? (boldMatch.index! <= italicMatch.index! ? boldMatch : italicMatch)
+        : boldMatch || italicMatch;
+
+      if (!match || match.index === undefined) {
+        parts.push(remaining);
+        break;
+      }
+
+      if (match.index > 0) {
+        parts.push(remaining.slice(0, match.index));
+      }
+
+      if (match[0].startsWith("**")) {
+        parts.push(<strong key={key++} className="text-zinc-200 font-semibold">{match[1]}</strong>);
+      } else {
+        parts.push(<em key={key++} className="text-zinc-300 italic">{match[1]}</em>);
+      }
+
+      remaining = remaining.slice(match.index + match[0].length);
+    }
+
+    return parts.length === 1 ? parts[0] : <>{parts}</>;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushList();
+      continue;
+    }
+
+    // Headings
+    if (trimmed.startsWith("### ")) {
+      flushList();
+      elements.push(
+        <h4 key={`h4-${i}`} className="text-sm font-semibold text-zinc-200 mt-4 mb-1">
+          {formatInline(trimmed.slice(4))}
+        </h4>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      flushList();
+      elements.push(
+        <h3 key={`h3-${i}`} className="text-sm font-bold text-zinc-100 mt-4 mb-2 border-b border-white/[0.06] pb-1">
+          {formatInline(trimmed.slice(3))}
+        </h3>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      flushList();
+      elements.push(
+        <h2 key={`h2-${i}`} className="text-base font-bold text-zinc-100 mt-4 mb-2">
+          {formatInline(trimmed.slice(2))}
+        </h2>
+      );
+      continue;
+    }
+
+    // Unordered list
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      if (!listItems || listItems.type !== "ul") {
+        flushList();
+        listItems = { type: "ul", items: [] };
+      }
+      listItems.items.push(formatInline(trimmed.slice(2)));
+      continue;
+    }
+
+    // Ordered list
+    const olMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (olMatch) {
+      if (!listItems || listItems.type !== "ol") {
+        flushList();
+        listItems = { type: "ol", items: [] };
+      }
+      listItems.items.push(formatInline(olMatch[2]));
+      continue;
+    }
+
+    // Regular paragraph
+    flushList();
+    elements.push(
+      <p key={`p-${i}`} className="text-xs text-zinc-400 leading-relaxed my-1">
+        {formatInline(trimmed)}
+      </p>
+    );
+  }
+
+  flushList();
+  return elements;
+}
+
 function InsightCard({ widget }: { widget: DashboardResponse["widgets"][0] }) {
   const data = widget.data as WidgetData | null;
   const text = data?.text || "";
 
   return (
-    <div className="glass-card p-5 col-span-2">
-      <div className="flex items-start gap-3">
-        <div className="p-2 rounded-xl bg-brand-500/10 border border-brand-500/10 shrink-0">
-          <SparklesIcon className="w-4 h-4 text-brand-400" />
+    <div className="glass-card p-6 col-span-full">
+      <div className="flex items-start gap-4">
+        <div className="p-2.5 rounded-xl bg-gradient-to-br from-brand-500/10 to-purple-500/10 border border-brand-500/10 shrink-0">
+          <SparklesIcon className="w-5 h-5 text-brand-400" />
         </div>
-        <div>
-          <h3 className="text-sm font-medium text-zinc-300 mb-1">{widget.title}</h3>
-          <p className="text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap">{text}</p>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-zinc-200 mb-3">{widget.title}</h3>
+          <div className="prose-insight">{renderMarkdown(text)}</div>
         </div>
       </div>
     </div>
@@ -229,6 +365,106 @@ function DashboardGrid({ dashboard }: { dashboard: DashboardResponse }) {
   );
 }
 
+/* ---------- Email Modal ---------- */
+function EmailModal({
+  open,
+  onClose,
+  dashboardId,
+  dashboardTitle,
+}: {
+  open: boolean;
+  onClose: () => void;
+  dashboardId: string;
+  dashboardTitle: string;
+}) {
+  const [recipients, setRecipients] = useState("");
+  const [subject, setSubject] = useState("");
+  const [sending, setSending] = useState(false);
+  const { toast } = useToast();
+
+  const handleSend = async () => {
+    const emails = recipients
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) {
+      toast("error", "Enter at least one recipient email");
+      return;
+    }
+    setSending(true);
+    try {
+      await api.sendDashboardEmail(dashboardId, emails, subject || undefined);
+      toast("success", "Email sent successfully");
+      onClose();
+      setRecipients("");
+      setSubject("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to send email";
+      toast("error", msg);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Email Dashboard"
+      description={`Send "${dashboardTitle}" via email`}
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+            Recipients (comma-separated)
+          </label>
+          <input
+            type="text"
+            value={recipients}
+            onChange={(e) => setRecipients(e.target.value)}
+            placeholder="john@example.com, jane@example.com"
+            className="input-glass"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+            Subject (optional)
+          </label>
+          <input
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            placeholder={`Dashboard Report: ${dashboardTitle}`}
+            className="input-glass"
+          />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="btn-ghost text-xs py-1.5">
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={!recipients.trim() || sending}
+            className="btn-primary flex items-center gap-2"
+          >
+            {sending ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Sending...
+              </>
+            ) : (
+              <>
+                <EnvelopeIcon className="w-4 h-4" />
+                Send
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function DashboardsPage() {
   const [dashboards, setDashboards] = useState<DashboardResponse[]>([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -237,6 +473,8 @@ export default function DashboardsPage() {
   const [loading, setLoading] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [selectedDs, setSelectedDs] = useState("");
+  const [activeTabIdx, setActiveTabIdx] = useState(0);
+  const [emailTarget, setEmailTarget] = useState<DashboardResponse | null>(null);
   const { toast } = useToast();
 
   const loadDashboards = useCallback(async () => {
@@ -262,6 +500,7 @@ export default function DashboardsPage() {
     try {
       const dashboard = await api.generateDashboard(prompt, selectedDs || undefined);
       setDashboards((prev) => [dashboard, ...prev]);
+      setActiveTabIdx(0); // Select the newly generated dashboard
       setShowCreate(false);
       setPrompt("");
       toast("success", "Dashboard generated");
@@ -275,17 +514,28 @@ export default function DashboardsPage() {
   const handleDelete = async (id: string) => {
     try {
       await api.deleteDashboard(id);
-      setDashboards((prev) => prev.filter((d) => d.id !== id));
+      setDashboards((prev) => {
+        const next = prev.filter((d) => d.id !== id);
+        // Adjust active tab if needed
+        if (activeTabIdx >= next.length && next.length > 0) {
+          setActiveTabIdx(next.length - 1);
+        } else if (next.length === 0) {
+          setActiveTabIdx(0);
+        }
+        return next;
+      });
       toast("success", "Dashboard deleted");
     } catch {
       toast("error", "Failed to delete dashboard");
     }
   };
 
+  const activeDashboard = dashboards[activeTabIdx] ?? null;
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold text-zinc-100 tracking-tight">Dashboards</h2>
           <p className="text-sm text-zinc-600 mt-0.5">
@@ -390,6 +640,16 @@ export default function DashboardsPage() {
         </div>
       </Modal>
 
+      {/* Email Modal */}
+      {emailTarget && (
+        <EmailModal
+          open={!!emailTarget}
+          onClose={() => setEmailTarget(null)}
+          dashboardId={emailTarget.id}
+          dashboardTitle={emailTarget.title}
+        />
+      )}
+
       {/* Loading State */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -411,37 +671,81 @@ export default function DashboardsPage() {
           }
         />
       ) : (
-        <div className="space-y-8">
-          {dashboards.map((dashboard, i) => (
+        <div>
+          {/* Tab Bar */}
+          <div className="flex items-center border-b border-white/[0.06] mb-6 overflow-x-auto scrollbar-thin">
+            {dashboards.map((dashboard, idx) => (
+              <button
+                key={dashboard.id}
+                onClick={() => setActiveTabIdx(idx)}
+                className={`group relative flex items-center gap-2 px-4 py-2.5 text-sm whitespace-nowrap transition-colors shrink-0 ${
+                  idx === activeTabIdx
+                    ? "text-brand-400"
+                    : "text-zinc-600 hover:text-zinc-300"
+                }`}
+              >
+                <span className="truncate max-w-[180px]">{dashboard.title}</span>
+                <span className="text-[10px] text-zinc-700">
+                  {new Date(dashboard.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                </span>
+                {/* Delete button on tab */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(dashboard.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 hover:text-red-400 transition-all ml-1"
+                  title="Delete"
+                >
+                  <XMarkIcon className="w-3.5 h-3.5" />
+                </button>
+                {/* Active indicator */}
+                {idx === activeTabIdx && (
+                  <motion.span
+                    layoutId="dashboard-tab-indicator"
+                    className="absolute bottom-0 left-0 right-0 h-[2px] bg-brand-500 rounded-full"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Active Dashboard Content */}
+          {activeDashboard && (
             <motion.div
-              key={dashboard.id}
-              initial={{ opacity: 0, y: 12 }}
+              key={activeDashboard.id}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
+              transition={{ duration: 0.2 }}
             >
+              {/* Dashboard header with actions */}
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-zinc-200">{dashboard.title}</h3>
-                  {dashboard.prompt && (
-                    <p className="text-xs text-zinc-600 mt-0.5">{dashboard.prompt}</p>
+                  <h3 className="text-lg font-semibold text-zinc-200">{activeDashboard.title}</h3>
+                  {activeDashboard.prompt && (
+                    <p className="text-xs text-zinc-600 mt-0.5">{activeDashboard.prompt}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-zinc-700">
-                    {new Date(dashboard.created_at).toLocaleDateString()}
-                  </span>
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleDelete(dashboard.id)}
-                    className="btn-icon text-zinc-600 hover:text-red-400"
+                    onClick={() => setEmailTarget(activeDashboard)}
+                    className="btn-ghost p-2 text-zinc-500 hover:text-brand-400"
+                    title="Email dashboard"
+                  >
+                    <EnvelopeIcon className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(activeDashboard.id)}
+                    className="btn-ghost p-2 text-zinc-600 hover:text-red-400"
                     title="Delete dashboard"
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-              <DashboardGrid dashboard={dashboard} />
+              <DashboardGrid dashboard={activeDashboard} />
             </motion.div>
-          ))}
+          )}
         </div>
       )}
     </div>

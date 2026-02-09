@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     # --- Encryption (Fernet key for datasource credentials) ---
     encryption_key: Optional[str] = None  # generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
+    # --- SMTP (optional, admin-configurable via API) ---
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from_email: Optional[str] = None
+    smtp_use_tls: bool = True
+
     @property
     def pg_connection_string(self) -> str:
         ssl = f"?sslmode={self.pg_ssl_mode}" if self.pg_ssl_mode != "disable" else ""

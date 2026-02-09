@@ -19,12 +19,15 @@ import {
   ServerIcon,
   CpuChipIcon,
   ArrowPathIcon,
+  EnvelopeIcon,
+  CheckCircleIcon,
+  XCircleIcon,
 } from "@heroicons/react/24/outline";
 
 import { StatCard } from "@/components/ui/StatCard";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
-import type { LLMLog, QueryLog } from "@/types";
+import type { LLMLog, QueryLog, SmtpConfig, SmtpConfigCreate } from "@/types";
 
 const tooltipStyle = {
   contentStyle: {
@@ -96,8 +99,232 @@ function MiniErrorChart({ logs }: { logs: LLMLog[] }) {
   );
 }
 
+function SmtpConfigSection() {
+  const [config, setConfig] = useState<SmtpConfig | null>(null);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ status: string; message: string } | null>(null);
+  const { toast } = useToast();
+
+  // Form state
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("587");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [fromEmail, setFromEmail] = useState("");
+  const [useTls, setUseTls] = useState(true);
+
+  useEffect(() => {
+    api
+      .getSmtpConfig()
+      .then((cfg) => {
+        if (cfg) {
+          setConfig(cfg);
+          setHost(cfg.host);
+          setPort(String(cfg.port));
+          setUsername(cfg.username || "");
+          setFromEmail(cfg.from_email);
+          setUseTls(cfg.use_tls);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingConfig(false));
+  }, []);
+
+  const handleSave = async () => {
+    if (!host.trim() || !fromEmail.trim()) {
+      toast("error", "Host and From Email are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      const data: SmtpConfigCreate = {
+        host: host.trim(),
+        port: parseInt(port) || 587,
+        username: username.trim() || undefined,
+        password: password.trim() || undefined,
+        from_email: fromEmail.trim(),
+        use_tls: useTls,
+      };
+      const saved = await api.saveSmtpConfig(data);
+      setConfig(saved);
+      setPassword(""); // Clear password after save
+      toast("success", "SMTP configuration saved");
+    } catch {
+      toast("error", "Failed to save SMTP configuration");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.testSmtpConnection();
+      setTestResult(result);
+      if (result.status === "ok") {
+        toast("success", "SMTP connection successful");
+      } else {
+        toast("error", result.message);
+      }
+    } catch {
+      setTestResult({ status: "error", message: "Connection test failed" });
+      toast("error", "Connection test failed");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  if (loadingConfig) {
+    return (
+      <div className="glass-card p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-zinc-800 rounded w-1/4" />
+          <div className="h-10 bg-zinc-800 rounded" />
+          <div className="h-10 bg-zinc-800 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-card p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 rounded-xl bg-brand-500/10 border border-brand-500/10">
+          <EnvelopeIcon className="w-5 h-5 text-brand-400" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-200">SMTP Configuration</h3>
+          <p className="text-xs text-zinc-600">Configure email settings for dashboard reports</p>
+        </div>
+        {config && (
+          <span className="ml-auto flex items-center gap-1 text-xs text-emerald-400">
+            <CheckCircleIcon className="w-4 h-4" />
+            Configured
+          </span>
+        )}
+        {!config && (
+          <span className="ml-auto flex items-center gap-1 text-xs text-zinc-600">
+            <XCircleIcon className="w-4 h-4" />
+            Not configured
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">SMTP Host *</label>
+          <input
+            type="text"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder="smtp.gmail.com"
+            className="input-glass"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">Port</label>
+          <input
+            type="number"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+            placeholder="587"
+            className="input-glass"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">Username</label>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="your-email@gmail.com"
+            className="input-glass"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={config ? "********" : "App password"}
+            className="input-glass"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5">From Email *</label>
+          <input
+            type="email"
+            value={fromEmail}
+            onChange={(e) => setFromEmail(e.target.value)}
+            placeholder="noreply@yourcompany.com"
+            className="input-glass"
+          />
+        </div>
+        <div className="flex items-center gap-3 pt-5">
+          <label className="text-xs text-zinc-400 flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useTls}
+              onChange={(e) => setUseTls(e.target.checked)}
+              className="rounded border-zinc-700 bg-zinc-900 text-brand-500 focus:ring-brand-500"
+            />
+            Use TLS
+          </label>
+        </div>
+      </div>
+
+      {testResult && (
+        <div
+          className={`mt-4 p-3 rounded-lg text-xs ${
+            testResult.status === "ok"
+              ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-300"
+              : "bg-red-500/10 border border-red-500/20 text-red-300"
+          }`}
+        >
+          {testResult.message}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-white/[0.06]">
+        <button
+          onClick={handleTest}
+          disabled={testing || !host.trim()}
+          className="btn-ghost text-xs flex items-center gap-1.5"
+        >
+          {testing ? (
+            <>
+              <div className="w-3.5 h-3.5 border-2 border-zinc-500/30 border-t-zinc-300 rounded-full animate-spin" />
+              Testing...
+            </>
+          ) : (
+            "Test Connection"
+          )}
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving || !host.trim() || !fromEmail.trim()}
+          className="btn-primary text-xs flex items-center gap-1.5"
+        >
+          {saving ? (
+            <>
+              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Saving...
+            </>
+          ) : (
+            "Save Configuration"
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
-  const [tab, setTab] = useState<"llm" | "query" | "cache">("llm");
+  const [tab, setTab] = useState<"llm" | "query" | "cache" | "smtp">("llm");
   const [llmLogs, setLlmLogs] = useState<LLMLog[]>([]);
   const [queryLogs, setQueryLogs] = useState<QueryLog[]>([]);
   const [cacheStats, setCacheStats] = useState<Record<string, number>>({});
@@ -106,7 +333,8 @@ export default function AdminPage() {
   const refresh = useCallback(async () => {
     if (tab === "llm") setLlmLogs(await api.getLLMLogs());
     else if (tab === "query") setQueryLogs(await api.getQueryLogs());
-    else setCacheStats(await api.getCacheStats());
+    else if (tab === "cache") setCacheStats(await api.getCacheStats());
+    // SMTP tab doesn't need server refresh - it loads its own data
   }, [tab]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -119,14 +347,14 @@ export default function AdminPage() {
 
   const errorCount = useMemo(() => llmLogs.filter((l) => l.error).length, [llmLogs]);
 
-  const tabs = ["llm", "query", "cache"] as const;
+  const tabs = ["llm", "query", "cache", "smtp"] as const;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h2 className="text-xl font-bold text-zinc-100 tracking-tight">Admin / Observability</h2>
-          <p className="text-sm text-zinc-600 mt-0.5">Monitor LLM calls, queries, and cache performance</p>
+          <p className="text-sm text-zinc-600 mt-0.5">Monitor LLM calls, queries, cache, and email settings</p>
         </div>
       </div>
 
@@ -148,19 +376,21 @@ export default function AdminPage() {
               tab === t ? "text-brand-400" : "text-zinc-600 hover:text-zinc-300"
             }`}
           >
-            {t === "llm" ? "LLM Logs" : t === "query" ? "Query Logs" : "Cache"}
+            {t === "llm" ? "LLM Logs" : t === "query" ? "Query Logs" : t === "cache" ? "Cache" : "SMTP"}
             {tab === t && (
               <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-brand-500 rounded-full" />
             )}
           </button>
         ))}
-        <button
-          onClick={refresh}
-          className="ml-auto btn-ghost text-xs py-1.5 mb-1 flex items-center gap-1.5"
-        >
-          <ArrowPathIcon className="w-3.5 h-3.5" />
-          Refresh
-        </button>
+        {tab !== "smtp" && (
+          <button
+            onClick={refresh}
+            className="ml-auto btn-ghost text-xs py-1.5 mb-1 flex items-center gap-1.5"
+          >
+            <ArrowPathIcon className="w-3.5 h-3.5" />
+            Refresh
+          </button>
+        )}
       </div>
 
       {tab === "llm" && (
@@ -182,7 +412,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {llmLogs.map((l, i) => (
+                {llmLogs.map((l) => (
                   <tr key={l.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
                     <td className="py-2.5 px-4 text-zinc-400">{new Date(l.created_at).toLocaleTimeString()}</td>
                     <td className="py-2.5 px-4 text-zinc-300">{l.model}</td>
@@ -247,6 +477,8 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {tab === "smtp" && <SmtpConfigSection />}
     </div>
   );
 }
