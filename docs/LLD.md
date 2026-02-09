@@ -1,6 +1,6 @@
 # Low-Level Design (LLD) — Insighting Analytics
 
-**Version:** 0.2.0
+**Version:** 0.4.0
 **Date:** February 2026
 
 ---
@@ -18,11 +18,14 @@ main.py
   │                           services/schema_registry.py
   ├── api/dashboards.py ───► services/dashboard.py
   │                           services/db_engine.py
+  │                           services/email_service.py
   ├── api/schema.py ───────► services/schema_registry.py
+  │                           services/question_generator.py
   ├── api/alerts.py ───────► services/scheduler.py
   ├── api/glossary.py
   ├── api/admin.py ────────► services/observability.py
   │                           services/cache.py
+  │                           services/email_service.py (SMTP config)
   ├── api/exports.py ──────► services/export.py
   └── api/health.py
 ```
@@ -95,6 +98,19 @@ Request → Router (api/*.py) → Service (services/*.py) → ORM (models/orm.py
                        └──────────────────┘       │ error             │
                                                    │ created_at        │
                                                    └───────────────────┘
+
+┌──────────────────┐
+│   smtp_config    │
+├──────────────────┤
+│ id (PK)          │
+│ host             │
+│ port             │
+│ username         │
+│ encrypted_pwd    │
+│ from_email       │
+│ use_tls          │
+│ updated_at       │
+└──────────────────┘
 ```
 
 ### 2.2 Table Details
@@ -112,6 +128,11 @@ Request → Router (api/*.py) → Service (services/*.py) → ORM (models/orm.py
 **dashboards** — Stores AI-generated dashboard configurations.
 - `widgets_json` is a TEXT column storing a JSON array of widget configs
 - Each widget has: id, type, title, data, config
+
+**smtp_config** — Stores SMTP configuration for email reports.
+- Single-row table (one SMTP config per instance)
+- `encrypted_password` uses Fernet symmetric encryption (same key as datasource passwords)
+- Configured via Admin UI, not environment variables
 
 ---
 
@@ -185,7 +206,41 @@ generate_recommendations(query, answer, context)
   └── 5. Return List[Recommendation]
 ```
 
-### 3.5 Schema Registry (`schema_registry.py`)
+### 3.5 Question Generator (`question_generator.py`)
+
+```
+generate_questions(table_names, schema_summary)
+  │
+  ├── 1. Compute cache key (MD5 of sorted table names)
+  ├── 2. Check in-memory cache (TTL = 30 min)
+  │     └── Cache hit? → return cached questions
+  ├── 3. Build structured prompt with schema summary
+  ├── 4. Call Ollama LLM via OpenAI-compatible client
+  ├── 5. Parse JSON response → SuggestedQuestion[]
+  │     (text, category, icon_hint)
+  ├── 6. Cache result
+  └── 7. Return questions (fallback to generic if LLM fails)
+```
+
+### 3.6 Email Service (`email_service.py`)
+
+```
+send_dashboard_email(dashboard_id, recipient_emails, db)
+  │
+  ├── 1. Load SMTP config from smtp_config table
+  ├── 2. Load dashboard from dashboards table
+  ├── 3. Render widgets to HTML email template
+  │     ├── KPIs → styled inline-block divs
+  │     ├── Tables → HTML <table> (max 20 rows)
+  │     ├── Insights → formatted text with borders
+  │     └── Charts → description placeholder (not renderable in email)
+  ├── 4. Build MIMEMultipart message
+  ├── 5. Connect to SMTP server (TLS if configured)
+  ├── 6. Authenticate + send
+  └── 7. Return status
+```
+
+### 3.7 Schema Registry (`schema_registry.py`)
 
 ```
 introspect(datasource_id, connection_string, db_type)
@@ -223,6 +278,22 @@ introspect(datasource_id, connection_string, db_type)
 | GET | `/dashboards` | — | `DashboardOut[]` |
 | GET | `/dashboards/{id}` | — | `DashboardOut` |
 | DELETE | `/dashboards/{id}` | — | 204 |
+| POST | `/dashboards/email` | `{dashboard_id, recipients[], subject?}` | `{status, message}` |
+
+### 4.4 Schema Endpoints
+
+| Method | Path | Request Body | Response |
+|--------|------|-------------|----------|
+| GET | `/schema/{datasource_id}` | — | `SchemaMap` |
+| GET | `/schema/suggested-questions` | `?datasource_id={optional}` | `SuggestedQuestionsResponse` |
+
+### 4.5 Admin Endpoints (SMTP)
+
+| Method | Path | Request Body | Response |
+|--------|------|-------------|----------|
+| GET | `/admin/smtp` | — | `SmtpConfigOut \| null` |
+| POST | `/admin/smtp` | `SmtpConfigCreate` | `SmtpConfigOut` |
+| POST | `/admin/smtp/test` | — | `{status, message}` |
 
 ### 4.3 Datasource Endpoints
 
@@ -265,12 +336,14 @@ layout.tsx (Root Layout)
 │   └── Input Area (auto-resize textarea)
 │
 ├── dashboards/page.tsx
+│   ├── Tab Bar (horizontal, animated underline)
 │   ├── GenerateDashboard Modal
+│   ├── EmailModal (recipient input, send)
 │   └── DashboardGrid
 │       ├── KPICard
 │       ├── ChartWidget
-│       ├── TableWidget
-│       └── InsightCard
+│       ├── TableWidget (full-width)
+│       └── InsightCard (markdown-rendered, full-width)
 │
 ├── datasources/page.tsx
 │   ├── DB Type Selector (6 types)
@@ -282,6 +355,10 @@ layout.tsx (Root Layout)
 ├── glossary/page.tsx
 ├── alerts/page.tsx
 └── admin/page.tsx
+    ├── LLM Logs Tab
+    ├── Query Logs Tab
+    ├── Cache Tab
+    └── SMTP Config Tab (SmtpConfigSection)
 ```
 
 ### 5.2 State Management

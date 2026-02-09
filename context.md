@@ -199,6 +199,77 @@ A comprehensive UI/UX overhaul + feature expansion of the Insighting Analytics p
 
 ---
 
+### 6. v0.4.0 — HR Dataset, Dynamic Questions, Email, Dashboard Tabs, Markdown Insights
+
+**`scripts/seed_hr_data.sql`** (NEW)
+- 7-table HR/People Analytics dataset: employees (500), employee_attrition (150), performance_ratings (1000), employee_recognition (300), pulse_surveys (2000), employee_learning (400), employee_promotions (100)
+- Realistic correlations: attrition employees have lower survey scores, high performers get more recognition/promotions
+- Departments: Engineering, Product, Sales, Marketing, HR, Finance, Support, Operations
+- Locations: Mumbai, Bangalore, Delhi, Hyderabad, Pune, Chennai
+
+**`backend/app/services/question_generator.py`** (NEW)
+- `generate_questions(table_names, schema_summary)` — calls Ollama LLM to generate 6 analytical questions from the database schema
+- In-memory cache keyed by MD5 hash of sorted table names (30-min TTL)
+- Falls back to generic questions if LLM is unavailable
+- Returns structured `SuggestedQuestion` objects (text, category, icon_hint)
+
+**`backend/app/services/email_service.py`** (NEW)
+- `send_dashboard_email(dashboard_id, recipient_emails, db)` — renders dashboard widgets into HTML email
+- `test_smtp_connection(db)` — tests SMTP connection without sending
+- Renders KPIs as styled divs, tables as HTML tables, insights as formatted text, charts as descriptions
+- Loads SMTP config from `smtp_config` DB table, decrypts password with Fernet
+
+**`backend/app/api/schema.py`** (MODIFIED)
+- Added `GET /schema/suggested-questions?datasource_id={optional}` endpoint (before `/{datasource_id}` route to avoid path conflicts)
+- Falls back to introspecting default PG connection if no datasource_id
+
+**`backend/app/api/dashboards.py`** (MODIFIED)
+- Added `POST /dashboards/email` endpoint for sending dashboard reports via email
+
+**`backend/app/api/admin.py`** (MODIFIED)
+- Added `GET /admin/smtp` — retrieve SMTP config
+- Added `POST /admin/smtp` — save/update SMTP config (encrypts password)
+- Added `POST /admin/smtp/test` — test SMTP connection
+
+**`backend/app/models/schemas.py`** (MODIFIED)
+- Added: `SuggestedQuestion`, `SuggestedQuestionsResponse`, `SmtpConfigCreate`, `SmtpConfigOut`, `DashboardEmailRequest`
+
+**`backend/app/models/orm.py`** (MODIFIED)
+- Added `SmtpConfig` table: id, host, port, username, encrypted_password, from_email, use_tls, updated_at
+
+**`backend/app/core/config.py`** (MODIFIED)
+- Added optional SMTP settings: smtp_host, smtp_port, smtp_username, smtp_password, smtp_from_email, smtp_use_tls
+
+**`backend/app/services/intelligence.py`** (MODIFIED)
+- Added `custom_whitelisted_dependencies: ["seaborn", "scipy", "numpy"]` to SmartDatalake config
+- Fixes PandasAI blocking seaborn imports for correlation/scatter plot generation
+
+**`frontend/src/app/page.tsx`** (MODIFIED)
+- Replaced hardcoded `SUGGESTED_PROMPTS` with dynamic API-fetched questions via `api.getSuggestedQuestions()`
+- Added `ICON_MAP` (chart/table/search/bolt → Heroicons) and `COLOR_MAP` (category → gradient)
+- Added `PromptSkeleton` loading component, `EmptyState` component with API call + fallback
+- Grid changed to `lg:grid-cols-3` for up to 6 dynamic questions
+
+**`frontend/src/app/dashboards/page.tsx`** (MODIFIED)
+- Added `renderMarkdown()` function: handles `## headings`, `**bold**`, `*italic*`, `- bullets`, `1. numbered lists`
+- `InsightCard` now renders formatted markdown instead of raw text
+- Added `EmailModal` component with recipient input and send functionality
+- Replaced vertical dashboard list with horizontal tab bar + animated underline (Framer Motion)
+- Email button (EnvelopeIcon) on each dashboard header
+
+**`frontend/src/app/admin/page.tsx`** (MODIFIED)
+- Added `SmtpConfigSection` component: form for host, port, username, password, from_email, use_tls
+- Added "Test Connection" and "Save" buttons with loading states
+- Added "smtp" tab to the existing admin tabs
+
+**`frontend/src/lib/api.ts`** (MODIFIED)
+- Added: `getSuggestedQuestions(datasourceId?)`, `sendDashboardEmail(dashboardId, recipients, subject?)`, `getSmtpConfig()`, `saveSmtpConfig(data)`, `testSmtpConnection()`
+
+**`frontend/src/types/index.ts`** (MODIFIED)
+- Added: `SuggestedQuestion`, `SuggestedQuestionsResponse`, `SmtpConfig`, `SmtpConfigCreate` interfaces
+
+---
+
 ## Pending / Future Work
 
 These items would be needed for full production readiness:

@@ -8,10 +8,11 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 
 ## Stack
 
-- **Backend:** Python 3.11 (strict requirement — PandasAI does not support 3.12+), FastAPI, PandasAI, SQLAlchemy, Ollama (FOSS LLM)
+- **Backend:** Python 3.11 (strict requirement — PandasAI does not support 3.12+), FastAPI, PandasAI, SQLAlchemy, seaborn, scipy, Ollama (FOSS LLM)
 - **Frontend:** Next.js 14 (App Router), TypeScript, TailwindCSS, Framer Motion, Recharts
 - **Data stores:** PostgreSQL/MySQL/MSSQL/Databricks (user data), CSV/Excel uploads, SQLite (app metadata)
 - **LLM:** Ollama Cloud with model `gpt-oss:120b-cloud`. Auth via Bearer token in `OLLAMA_API_TOKEN`.
+- **Email:** SMTP via smtplib, admin-configurable through the UI. Passwords encrypted with Fernet.
 
 ## Build & Run
 
@@ -49,6 +50,12 @@ curl http://localhost:8000/health
 - **On-demand recommendations** — recommendations are NOT generated automatically. Users click "Get AI Recommendations" button which triggers a separate LLM call via `POST /chat/recommendations`.
 - **Multi-database support** — PostgreSQL, MySQL, MS SQL Server, Databricks, CSV, and Excel file uploads.
 - **Message feedback** — thumbs up/down on responses stored via `POST /chat/feedback`.
+- **Dynamic suggested questions** — LLM generates 6 analytical questions based on the actual database schema. Cached for 30 min. Falls back to generic questions if LLM is unavailable.
+- **Dashboard email reports** — SMTP configuration stored in `smtp_config` table. Dashboards rendered as HTML email with styled KPIs, tables, and insights.
+- **Dashboard tabs** — Multiple dashboards displayed as horizontal tabs with animated underline. Each tab has delete button.
+- **Markdown insights** — InsightCard renders markdown (headings, bold, italic, bullets, numbered lists) via a lightweight custom renderer (no external dependency).
+- **PandasAI whitelisted libs** — `seaborn`, `scipy`, `numpy` are whitelisted in SmartDatalake config for correlation/scatter plots.
+- **HR demo dataset** — 7-table People Analytics dataset in `scripts/seed_hr_data.sql` (4,450 rows) with realistic correlations.
 
 ## Directory Layout
 
@@ -56,8 +63,9 @@ curl http://localhost:8000/health
 backend/app/
   api/          → FastAPI routers (9 files). Each router is a thin layer over a service.
   core/         → config.py, database.py, guardrails.py, lifespan.py
-  models/       → schemas.py (40+ Pydantic models), orm.py (10 SQLAlchemy tables incl. Dashboard)
-  services/     → Business logic (11 files). intelligence.py is main orchestrator, db_engine.py is engine factory.
+  models/       → schemas.py (45+ Pydantic models), orm.py (11 SQLAlchemy tables incl. Dashboard, SmtpConfig)
+  services/     → Business logic (13 files). intelligence.py is main orchestrator, db_engine.py is engine factory,
+                  question_generator.py for dynamic suggestions, email_service.py for SMTP email.
   skills/       → PandasAI @skill functions (statistical, timeseries, profiling)
   static/       → Generated chart PNGs served via StaticFiles
 
@@ -75,7 +83,7 @@ frontend/src/
   types/        → index.ts (all shared TypeScript interfaces)
   contexts/     → AuthContext.tsx
 
-scripts/        → run_dev.sh (legacy dev script)
+scripts/        → seed_hr_data.sql (HR dataset), run_dev.sh (legacy dev script)
 start.sh        → Start backend + frontend
 stop.sh         → Stop all services
 ```
@@ -103,13 +111,20 @@ stop.sh         → Stop all services
 - `GET /dashboards` — List all saved dashboards
 - `GET /dashboards/{id}` — Get a single dashboard
 - `DELETE /dashboards/{id}` — Delete a dashboard
+- `POST /dashboards/email` — Send dashboard report via email (requires SMTP config)
+
+### Schema
+- `GET /schema/{datasource_id}` — Introspected schema with inferred relations
+- `GET /schema/suggested-questions?datasource_id={optional}` — LLM-powered suggested questions from schema
 
 ### Other
-- `GET /schema/{datasource_id}` — Introspected schema
 - `GET/POST/PUT/DELETE /alerts` — Scheduled SQL alerts
 - `GET/POST/PUT/DELETE /glossary` — Business glossary terms
 - `GET /admin/logs/*` — LLM and query logs
 - `GET/POST /admin/cache/*` — Cache stats and clearing
+- `GET /admin/smtp` — Get SMTP configuration
+- `POST /admin/smtp` — Save/update SMTP configuration
+- `POST /admin/smtp/test` — Test SMTP connection
 - `GET /export/{conversation_id}?format=csv|pdf` — Export conversations
 
 ## Code Patterns
@@ -136,10 +151,12 @@ stop.sh         → Stop all services
 Backend (`backend/.env`):
 - `PG_HOST/PORT/DATABASE/USERNAME/PASSWORD/SSL_MODE` — default PostgreSQL
 - `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_TOKEN` — LLM config
-- `ENCRYPTION_KEY` — Fernet key for stored passwords
+- `ENCRYPTION_KEY` — Fernet key for stored passwords and SMTP credentials
 
 Frontend (`frontend/.env.local`):
 - `NEXT_PUBLIC_API_URL` — backend URL (default: `http://localhost:8000`)
+
+**Note:** SMTP configuration is managed via the Admin UI (not env vars). Stored in the `smtp_config` SQLite table with encrypted passwords.
 
 ## Common Tasks
 
@@ -154,3 +171,25 @@ Frontend (`frontend/.env.local`):
 - Chart PNGs accumulate in `backend/app/static/charts/`.
 - `scheduler.py` uses `eval()` for threshold conditions — sandboxed but should be hardened further.
 - Login credentials: `admin` / `admin123` (hardcoded in AuthContext.tsx — replace for production).
+- **seaborn must be installed** in the backend venv — PandasAI generates code using it for correlation/scatter plots.
+- PandasAI config must whitelist `seaborn`, `scipy`, `numpy` via `custom_whitelisted_dependencies` or imports will be blocked.
+- The `/schema/suggested-questions` route must be defined BEFORE `/{datasource_id}` in schema.py to avoid FastAPI path conflicts.
+- SMTP passwords are encrypted with Fernet before storage. The `ENCRYPTION_KEY` env var must be set for this to work.
+
+## HR Demo Dataset
+
+The project ships with a 7-table People Analytics dataset for demo purposes:
+
+| Table | Rows | Purpose |
+|-------|------|---------|
+| `employees` | 500 | Core employee master data |
+| `employee_attrition` | 150 | Exit records with reasons and tenure |
+| `performance_ratings` | 1000 | Quarterly performance reviews |
+| `employee_recognition` | 300 | Recognition awards and points |
+| `pulse_surveys` | 2000 | Employee engagement survey responses |
+| `employee_learning` | 400 | Training courses and completion |
+| `employee_promotions` | 100 | Promotion history |
+
+Seed it with: `psql -p 5432 -d insighting_demo -f scripts/seed_hr_data.sql`
+
+Data has realistic correlations: attrition employees have lower survey scores, high performers get more recognition/promotions, attrition skews toward Sales/Support.

@@ -1,13 +1,13 @@
 # High-Level Design (HLD) — Insighting Analytics
 
-**Version:** 0.2.0
+**Version:** 0.4.0
 **Date:** February 2026
 
 ---
 
 ## 1. Executive Summary
 
-Insighting Analytics is a full-stack AI-powered natural language analytics platform. Users connect databases (PostgreSQL, MySQL, MS SQL Server, Databricks) or upload files (CSV, Excel), then ask questions in plain English. The system generates SQL, executes it, and returns answers with charts, statistical tests, data quality reports, and on-demand business recommendations. Users can also generate AI-powered dashboards from their datasets.
+Insighting Analytics is a full-stack AI-powered natural language analytics platform. Users connect databases (PostgreSQL, MySQL, MS SQL Server, Databricks) or upload files (CSV, Excel), then ask questions in plain English. The system generates SQL, executes it, and returns answers with charts, statistical tests, data quality reports, and on-demand business recommendations. Users can also generate AI-powered dashboards (with tab navigation and email sharing), receive LLM-generated suggested questions based on their schema, and configure SMTP for emailing dashboard reports.
 
 ---
 
@@ -67,9 +67,10 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 ### 3.2 Backend (FastAPI)
 - **Framework:** FastAPI with async handlers
 - **Language:** Python 3.11 (strict — PandasAI does not support 3.12+)
-- **Query Engine:** PandasAI SmartDatalake (generates Python/SQL from NL)
+- **Query Engine:** PandasAI SmartDatalake (generates Python/SQL from NL), whitelists seaborn/scipy/numpy
 - **ORM:** SQLAlchemy 2.0
 - **LLM:** Ollama Cloud via OpenAI-compatible API
+- **Email:** smtplib + email.mime for SMTP-based dashboard report delivery
 
 ### 3.3 LLM (Ollama Cloud)
 - OpenAI-compatible API endpoint
@@ -94,6 +95,10 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 | PandasAI SmartDatalake | Mature NL-to-SQL engine with built-in charting. |
 | On-demand recommendations | Reduces latency on primary query. User controls when to fetch. |
 | Multi-database engine factory | Single abstraction for PostgreSQL, MySQL, MSSQL, Databricks, CSV, Excel. |
+| Dynamic suggested questions | LLM generates questions from actual schema — improves discoverability. |
+| SMTP email via admin UI | No env-var SMTP config needed. Admin sets it up via UI, passwords encrypted. |
+| Dashboard tab navigation | Horizontal tabs for multi-dashboard browsing — replaces vertical stacking. |
+| Lightweight markdown renderer | Custom regex-based renderer — no react-markdown dependency. |
 | Client-rendered pages | Simpler deployment (no SSR concerns). All data via REST API. |
 | Glass-morphism design | Premium, modern aesthetic. Consistent brand language. |
 
@@ -172,6 +177,8 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 | ORM | SQLAlchemy | 2.0+ |
 | Metadata DB | SQLite | Built-in |
 | LLM | Ollama Cloud | gpt-oss:120b |
+| Visualization | seaborn, matplotlib | 0.13+, 3.9+ |
 | Encryption | Cryptography (Fernet) | 43+ |
+| Email | smtplib (stdlib) + email.mime | Built-in |
 | Scheduling | APScheduler | 3.10+ |
 | Export | ReportLab (PDF) | 4.2+ |

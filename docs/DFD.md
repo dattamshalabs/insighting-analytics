@@ -1,6 +1,6 @@
 # Data Flow Diagrams (DFD) — Insighting Analytics
 
-**Version:** 0.2.0
+**Version:** 0.4.0
 **Date:** February 2026
 
 ---
@@ -72,6 +72,18 @@
 │          │                      │ 5.0          │────────►│              │
 │          │◄─────────────────────│ Conversation │◄────────│              │
 │          │  Chat History        │ Manager      │         │              │
+│          │                      └──────────────┘         └──────────────┘
+│          │                                               ┌──────────────┐
+│          │     6. Get Suggested Questions                 │              │
+│          │─────────────────────►┌──────────────┐────────►│  Ollama      │
+│          │◄─────────────────────│ 6.0 Question │◄────────│  Cloud LLM   │
+│          │  6 Suggested Qs      │ Generator    │         │              │
+│          │                      └──────────────┘         └──────────────┘
+│          │                                               ┌──────────────┐
+│          │     7. Email Dashboard Report                  │              │
+│          │─────────────────────►┌──────────────┐────────►│  SMTP Server │
+│          │◄─────────────────────│ 7.0 Email    │         │  (External)  │
+│          │  Send Status         │ Service      │         │              │
 │          │                      └──────────────┘         └──────────────┘
 └──────────┘
 ```
@@ -270,12 +282,96 @@
 
 ---
 
+## Level 2 — Dynamic Suggested Questions (Process 6.0)
+
+```
+┌──────────┐
+│  User    │  opens chat page
+└────┬─────┘
+     │ datasource_id (optional)
+     ▼
+┌─────────────────┐
+│ 6.1             │
+│ Schema          │◄── Get schema from registry ── [In-memory: _registry]
+│ Resolution      │    or introspect default PG ── [User Database]
+└────────┬────────┘
+         │ table_names + schema_summary
+         ▼
+┌─────────────────┐
+│ 6.2             │◄── Check cache (MD5 hash) ─── [In-memory: _cache]
+│ Cache Check     │
+└────────┬────────┘
+         │
+         ├── Cache hit? ──► Return cached questions
+         │
+         └── Cache miss? ──► Continue
+                    │
+                    ▼
+         ┌─────────────────┐                  ┌──────────────────┐
+         │ 6.3             │──── Prompt ─────►│ Ollama Cloud LLM │
+         │ LLM Question    │◄── JSON array ──│                  │
+         │ Generation      │                  └──────────────────┘
+         └────────┬────────┘
+                  │ SuggestedQuestion[] (text, category, icon_hint)
+                  ▼
+         ┌─────────────────┐
+         │ 6.4             │──── Store ─────► [In-memory: _cache, TTL=30min]
+         │ Cache + Return  │
+         │                 │──── Response ──► User (6 questions)
+         └─────────────────┘
+```
+
+---
+
+## Level 2 — Dashboard Email Report (Process 7.0)
+
+```
+┌──────────┐
+│  User    │  clicks Email button on dashboard
+└────┬─────┘
+     │ dashboard_id + recipient_emails + subject
+     ▼
+┌─────────────────┐
+│ 7.1             │◄── Load config ──── [SQLite: smtp_config]
+│ SMTP Config     │
+│ Loading         │── Not configured? → Return error
+└────────┬────────┘
+         │ smtp config (host, port, creds)
+         ▼
+┌─────────────────┐
+│ 7.2             │◄── Load dashboard ─ [SQLite: dashboards]
+│ Dashboard       │
+│ Loading         │
+└────────┬────────┘
+         │ dashboard with widgets
+         ▼
+┌─────────────────┐
+│ 7.3             │── KPIs → styled inline divs
+│ HTML Email      │── Tables → HTML <table> (max 20 rows)
+│ Rendering       │── Insights → formatted text blocks
+│                 │── Charts → placeholder descriptions
+└────────┬────────┘
+         │ HTML email body
+         ▼
+┌─────────────────┐                  ┌──────────────────┐
+│ 7.4             │──── Send ───────►│ SMTP Server      │
+│ Email Sending   │◄── Status ──────│ (Gmail/SES/etc)  │
+│ (smtplib)       │                  └──────────────────┘
+└────────┬────────┘
+         │ {status, message}
+         ▼
+         User
+```
+
+---
+
 ## Data Store Catalog
 
 | Store | Type | Content | Persistence |
 |-------|------|---------|-------------|
 | SQLite metadata DB | File | Conversations, messages, datasources, dashboards, alerts, glossary, logs, feedback | Persistent (auto-created) |
 | Schema registry | Memory | Introspected schemas per datasource | Session-scoped (lost on restart) |
+| Question cache | Memory | Suggested questions keyed by table hash | TTL-based (30 min) |
 | Query cache | Memory/Redis | Query results keyed by hash | TTL-based (5 min default) |
 | Chart artifacts | File | Generated PNG charts | Persistent (accumulates) |
 | Uploaded files | File | CSV/Excel data files | Persistent (in data/uploads/) |
@@ -297,4 +393,7 @@
 | File Upload | User → Backend | Filesystem + SQLite | File bytes + metadata | User uploads CSV/Excel |
 | Schema Introspect | Backend → User DB | Memory registry | Tables, columns, FKs | On datasource create/refresh |
 | Export | User → Backend | — | CSV/PDF file download | User exports conversation |
+| Suggested Qs | Backend → LLM | Memory cache | 6 questions | Page load / datasource change |
+| Email Report | Backend → SMTP Server | — | HTML email | User clicks email button |
+| SMTP Config | User → Backend | SQLite (smtp_config) | Config + encrypted password | Admin saves config |
 | Alerts | Scheduler → Backend → DB | SQLite + Webhook | Alert trigger data | Cron schedule |

@@ -199,6 +199,41 @@ tail -f frontend.log    # Frontend logs
 
 ---
 
+## Seed the HR Demo Dataset (Optional)
+
+The project includes a 7-table HR/People Analytics dataset for immediate exploration. To seed it:
+
+```bash
+# Create the database (if it doesn't exist)
+createdb -p 5432 insighting_demo
+
+# Seed the HR tables (employees, attrition, performance, recognition, surveys, learning, promotions)
+psql -p 5432 -d insighting_demo -f scripts/seed_hr_data.sql
+```
+
+This creates 4,450 rows across 7 tables with realistic correlations. You can immediately ask questions like:
+- "What is the average attrition rate by department?"
+- "Is there a relationship between tenure and exit interview scores?"
+- "Show top 10 performers by rating"
+
+---
+
+## Configure SMTP for Email Reports (Optional)
+
+To enable emailing dashboard reports:
+
+1. Go to http://localhost:3000/admin
+2. Click the **SMTP** tab
+3. Fill in your SMTP details (host, port, username, password, from email, TLS)
+4. Click **Test Connection** to verify
+5. Click **Save**
+
+Now you can click the email icon on any dashboard to send it as a formatted HTML report.
+
+**Supported SMTP providers:** Gmail (smtp.gmail.com:587), Outlook (smtp.office365.com:587), AWS SES, SendGrid, or any SMTP server.
+
+---
+
 ## Connect a Datasource
 
 Insighting Analytics supports multiple database types via pre-built connectors:
@@ -228,7 +263,10 @@ The PG credentials in `backend/.env` are used as the default datasource.
 
 - **Natural language analytics** — ask questions about your data in plain English
 - **Multi-database support** — PostgreSQL, MySQL, MSSQL, Databricks, CSV, Excel
-- **AI dashboards** — generate dashboards with KPI cards, charts, and AI insights from your datasets
+- **AI dashboards** — generate dashboards with KPI cards, charts, tables, and formatted AI insights
+- **Dashboard tabs** — browse multiple dashboards via horizontal tab navigation
+- **Email reports** — send dashboard reports via email with configurable SMTP (Admin > SMTP)
+- **Dynamic suggested questions** — LLM generates contextual questions from your actual schema
 - **On-demand recommendations** — click "Get AI Recommendations" on any response for business insights
 - **Statistical analysis** — significance tests, time series analysis, data profiling
 - **Data quality reports** — automated data quality scoring with issue detection
@@ -238,6 +276,7 @@ The PG credentials in `backend/.env` are used as the default datasource.
 - **Business glossary** — define terms so the AI understands your domain
 - **Scheduled alerts** — set up SQL-based alerts with cron schedules
 - **Schema introspection** — auto-discovers tables, columns, types, and relationships
+- **HR demo dataset** — 7-table People Analytics dataset (4,450 rows) included for out-of-the-box exploration
 
 ---
 
@@ -271,6 +310,14 @@ rm backend/insighting_meta.db
 rm -rf frontend/node_modules frontend/.next
 cd frontend && npm install
 ```
+
+### PandasAI error: "import of sys/seaborn not in whitelist"
+Seaborn must be installed in the backend venv:
+```bash
+cd backend && source .venv/bin/activate
+pip install seaborn
+```
+The `custom_whitelisted_dependencies` in `intelligence.py` already includes `seaborn`, `scipy`, and `numpy`.
 
 ### Port already in use
 ```bash
