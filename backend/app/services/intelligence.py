@@ -276,6 +276,7 @@ async def process_query(
             "save_charts": False,
             "verbose": False,
             "enable_cache": False,
+            "custom_whitelisted_dependencies": ["seaborn", "scipy", "numpy"],
         },
     )
 
