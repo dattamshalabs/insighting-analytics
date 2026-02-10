@@ -29,6 +29,36 @@ def _now() -> datetime.datetime:
 
 
 # ---------------------------------------------------------------------------
+# Users & Authentication
+# ---------------------------------------------------------------------------
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    email = Column(String, nullable=False, unique=True, index=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="user")  # "user" | "admin"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+    last_login_at = Column(DateTime, nullable=True)
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now)
+
+    user = relationship("User", backref="refresh_tokens")
+
+
+# ---------------------------------------------------------------------------
 # Datasources
 # ---------------------------------------------------------------------------
 
@@ -131,6 +161,21 @@ class Alert(Base):
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
+    connectors = relationship("AlertConnectorConfig", back_populates="alert", cascade="all, delete-orphan")
+
+
+class AlertConnectorConfig(Base):
+    __tablename__ = "alert_connectors"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    alert_id = Column(String, ForeignKey("alerts.id"), nullable=False, index=True)
+    connector_type = Column(String, nullable=False)  # "email" | "slack" | "sftp"
+    config_json = Column(Text, nullable=False)  # Encrypted JSON config
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_now)
+
+    alert = relationship("Alert", back_populates="connectors")
+
 
 # ---------------------------------------------------------------------------
 # Business glossary
@@ -143,6 +188,9 @@ class GlossaryTerm(Base):
     term = Column(String, nullable=False, unique=True)
     sql_expression = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
+    formula_type = Column(String, default="expression")  # expression | calculation | metric
+    result_type = Column(String, default="numeric")  # numeric | string | boolean
+    dependencies_json = Column(Text, nullable=True)  # JSON array of dependent term names
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
@@ -190,6 +238,22 @@ class Dashboard(Base):
     widgets_json = Column(Text, nullable=False, default="[]")  # JSON array of widget configs
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    iterations = relationship("DashboardIteration", back_populates="dashboard", order_by="DashboardIteration.iteration_number")
+
+
+class DashboardIteration(Base):
+    __tablename__ = "dashboard_iterations"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    dashboard_id = Column(String, ForeignKey("dashboards.id"), nullable=False, index=True)
+    iteration_number = Column(Integer, nullable=False)
+    feedback = Column(Text, nullable=False)
+    previous_widgets_json = Column(Text, nullable=False)
+    new_widgets_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+    dashboard = relationship("Dashboard", back_populates="iterations")
 
 
 # ---------------------------------------------------------------------------

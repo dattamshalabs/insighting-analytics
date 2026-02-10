@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -11,16 +13,66 @@ from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.orm import Datasource
+from app.models.orm import Datasource, User
 from app.models.schemas import DatasourceCreate, DatasourceOut
 from app.services import schema_registry
 from app.services.db_engine import build_connection_string
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/datasources", tags=["datasources"])
 
 UPLOAD_DIR = Path("data/uploads")
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+# Allowed MIME types for file uploads
+ALLOWED_MIME_TYPES = {
+    "text/csv": ".csv",
+    "text/plain": ".csv",  # Some systems report CSV as text/plain
+    "application/csv": ".csv",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+}
+
+
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize filename to prevent path traversal and injection attacks."""
+    # Remove path components
+    filename = Path(filename).name
+    # Remove any characters that aren't alphanumeric, dash, underscore, or dot
+    filename = re.sub(r'[^\w\-.]', '_', filename)
+    # Prevent hidden files
+    filename = filename.lstrip('.')
+    # Limit length
+    if len(filename) > 100:
+        name, ext = os.path.splitext(filename)
+        filename = name[:96] + ext
+    return filename or "upload"
+
+
+def _validate_file_content(file_content: bytes, filename: str) -> str:
+    """Validate file content matches expected type and return the detected extension."""
+    try:
+        import magic
+        detected_mime = magic.from_buffer(file_content[:2048], mime=True)
+    except ImportError:
+        logger.warning("python-magic not installed, falling back to extension check")
+        ext = Path(filename).suffix.lower()
+        if ext in (".csv", ".xlsx", ".xls"):
+            return ext
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    if detected_mime not in ALLOWED_MIME_TYPES:
+        logger.warning("Rejected file upload with MIME type: %s", detected_mime)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Detected: {detected_mime}. Allowed: CSV, XLS, XLSX"
+        )
+
+    return ALLOWED_MIME_TYPES[detected_mime]
 
 
 def _encrypt(plaintext: str) -> str:
@@ -71,13 +123,20 @@ def _ds_to_out(ds: Datasource) -> DatasourceOut:
 
 
 @router.get("", response_model=list[DatasourceOut])
-async def list_datasources(db: Session = Depends(get_db)):
+async def list_datasources(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     rows = db.query(Datasource).order_by(Datasource.created_at.desc()).all()
     return [_ds_to_out(r) for r in rows]
 
 
 @router.post("", response_model=DatasourceOut, status_code=201)
-async def create_datasource(body: DatasourceCreate, db: Session = Depends(get_db)):
+async def create_datasource(
+    body: DatasourceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     ds = Datasource(
         name=body.name,
         db_type=body.db_type,
@@ -116,26 +175,40 @@ async def upload_file(
     file: UploadFile = File(...),
     name: str = Form(""),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Upload a CSV or Excel file as a datasource."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    ext = Path(file.filename).suffix.lower()
-    if ext not in (".csv", ".xlsx", ".xls"):
-        raise HTTPException(status_code=400, detail="Only .csv, .xlsx, and .xls files are supported")
+    # Read file content for validation
+    file_content = await file.read()
 
-    db_type = "csv" if ext == ".csv" else "excel"
-    ds_name = name or Path(file.filename).stem
+    # Check file size
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
+        )
 
-    # Save file
+    # Validate content type matches actual file content
+    detected_ext = _validate_file_content(file_content, file.filename)
+
+    # Sanitize filename
+    safe_filename = _sanitize_filename(file.filename)
+
+    # Determine db_type from validated extension
+    db_type = "csv" if detected_ext == ".csv" else "excel"
+    ds_name = name or Path(safe_filename).stem
+
+    # Save file with sanitized name
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     file_id = str(uuid.uuid4())[:8]
-    saved_filename = f"{file_id}_{file.filename}"
+    saved_filename = f"{file_id}_{safe_filename}"
     saved_path = UPLOAD_DIR / saved_filename
 
     with open(saved_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(file_content)
 
     ds = Datasource(
         name=ds_name,
@@ -150,7 +223,11 @@ async def upload_file(
 
 
 @router.delete("/{datasource_id}", status_code=204)
-async def delete_datasource(datasource_id: str, db: Session = Depends(get_db)):
+async def delete_datasource(
+    datasource_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     ds = db.query(Datasource).filter(Datasource.id == datasource_id).first()
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")
@@ -165,7 +242,11 @@ async def delete_datasource(datasource_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{datasource_id}/refresh-schema")
-async def refresh_schema(datasource_id: str, db: Session = Depends(get_db)):
+async def refresh_schema(
+    datasource_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     ds = db.query(Datasource).filter(Datasource.id == datasource_id).first()
     if not ds:
         raise HTTPException(status_code=404, detail="Datasource not found")

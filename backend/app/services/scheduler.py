@@ -8,11 +8,13 @@ from typing import Optional
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from simpleeval import simple_eval, InvalidExpression
 from sqlalchemy import create_engine, text
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models.orm import Alert
+from app.models.orm import Alert, AlertConnectorConfig
+from app.services.alert_connectors import get_connector
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +107,41 @@ async def _execute_alert(alert_id: str) -> None:
         if triggered:
             logger.info("Alert '%s' triggered (value=%s)", alert.name, first_val)
             import datetime
+            import json
             alert.last_triggered_at = datetime.datetime.utcnow()
             db.commit()
 
+            # Send to legacy webhook if configured
             if alert.webhook_url:
                 await _send_webhook(alert, first_val)
+
+            # Dispatch to all enabled connectors
+            connectors = (
+                db.query(AlertConnectorConfig)
+                .filter(
+                    AlertConnectorConfig.alert_id == alert_id,
+                    AlertConnectorConfig.enabled == True,
+                )
+                .all()
+            )
+            for conn_config in connectors:
+                connector = get_connector(conn_config.connector_type)
+                if connector:
+                    try:
+                        config = json.loads(conn_config.config_json)
+                        await connector.send(
+                            alert_name=alert.name,
+                            value=first_val,
+                            condition=alert.threshold_condition,
+                            config=config,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "Connector %s failed for alert %s: %s",
+                            conn_config.connector_type,
+                            alert.name,
+                            e,
+                        )
     except Exception as e:
         logger.error("Alert execution failed for %s: %s", alert_id, e)
     finally:
@@ -117,10 +149,19 @@ async def _execute_alert(alert_id: str) -> None:
 
 
 def _eval_condition(value, condition: str) -> bool:
-    """Evaluate a simple threshold like 'result > 100'."""
+    """Evaluate a simple threshold like 'result > 100' using safe expression parser.
+
+    Only allows: comparisons (>, <, >=, <=, ==, !=), boolean operators (and, or, not),
+    and the 'result' variable.
+    """
     try:
-        return eval(condition, {"__builtins__": {}}, {"result": value})
-    except Exception:
+        return bool(simple_eval(
+            condition,
+            names={"result": value},
+            functions={},  # No function calls allowed
+        ))
+    except (InvalidExpression, TypeError, ValueError, SyntaxError):
+        logger.warning("Invalid threshold condition: %s", condition)
         return False
 
 

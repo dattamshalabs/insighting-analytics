@@ -13,6 +13,7 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 - **Data stores:** PostgreSQL/MySQL/MSSQL/Databricks (user data), CSV/Excel uploads, SQLite (app metadata)
 - **LLM:** Ollama Cloud with model `gpt-oss:120b-cloud`. Auth via Bearer token in `OLLAMA_API_TOKEN`.
 - **Email:** SMTP via smtplib, admin-configurable through the UI. Passwords encrypted with Fernet.
+- **Authentication:** JWT-based with bcrypt password hashing. Access tokens (30 min) + refresh tokens (7 days).
 
 ## Build & Run
 
@@ -40,10 +41,20 @@ cd frontend && npx next build
 curl http://localhost:8000/health
 ```
 
+## Demo Credentials
+
+Demo users are auto-created on first startup:
+
+| Role | Email | Password |
+|------|-------|----------|
+| **User** | `demo@insighting.ai` | `demo2024!` |
+| **Admin** | `admin@insighting.ai` | `admin2024!` |
+
 ## Key Architecture Decisions
 
 - **Ollama only** — no OpenAI dependency. LLM calls go through Ollama Cloud or local Ollama instance.
 - **SQLite for metadata** — zero-config local DB, auto-created on first startup.
+- **JWT authentication** — All API endpoints (except /health, /auth/*) require authentication.
 - **PandasAI SmartDatalake** — core query engine. Generates Python/SQL, executes it, returns results.
 - **Guardrails are non-optional** — read-only SQL, timeout, row limits, PII masking.
 - **Schema context injection** — auto-introspects database schemas and infers relations.
@@ -52,25 +63,38 @@ curl http://localhost:8000/health
 - **Message feedback** — thumbs up/down on responses stored via `POST /chat/feedback`.
 - **Dynamic suggested questions** — LLM generates 6 analytical questions based on the actual database schema. Cached for 30 min. Falls back to generic questions if LLM is unavailable.
 - **Dashboard email reports** — SMTP configuration stored in `smtp_config` table. Dashboards rendered as HTML email with styled KPIs, tables, and insights.
+- **Dashboard iteration** — Users can iterate on dashboards with feedback. Iteration history is stored.
 - **Dashboard tabs** — Multiple dashboards displayed as horizontal tabs with animated underline. Each tab has delete button.
 - **Markdown insights** — InsightCard renders markdown (headings, bold, italic, bullets, numbered lists) via a lightweight custom renderer (no external dependency).
 - **PandasAI whitelisted libs** — `seaborn`, `scipy`, `numpy` are whitelisted in SmartDatalake config for correlation/scatter plots.
 - **HR demo dataset** — 7-table People Analytics dataset in `scripts/seed_hr_data.sql` (4,450 rows) with realistic correlations.
+- **Alert connectors** — Alerts can be sent via Email, Slack webhook, or SFTP.
+- **Glossary formulae** — Business glossary terms support formula types (expression/calculation/metric), result types, and dependencies.
+
+## Security Features (v0.4.0+)
+
+- **Safe expression evaluation** — `simpleeval` replaces `eval()` for threshold conditions
+- **SQL injection prevention** — Parameterized queries for row count lookups
+- **Rate limiting** — 100 requests/minute via slowapi
+- **File upload validation** — MIME type detection with python-magic, 50MB size limit
+- **Input validation** — Pydantic field validators for cron expressions, email addresses, lengths
+- **Restricted CORS** — Limited methods and headers
 
 ## Directory Layout
 
 ```
 backend/app/
-  api/          → FastAPI routers (9 files). Each router is a thin layer over a service.
-  core/         → config.py, database.py, guardrails.py, lifespan.py
-  models/       → schemas.py (45+ Pydantic models), orm.py (11 SQLAlchemy tables incl. Dashboard, SmtpConfig)
-  services/     → Business logic (13 files). intelligence.py is main orchestrator, db_engine.py is engine factory,
-                  question_generator.py for dynamic suggestions, email_service.py for SMTP email.
+  api/          → FastAPI routers (10 files). Each router is a thin layer over a service.
+  core/         → config.py, database.py, guardrails.py, lifespan.py, auth.py, rate_limit.py
+  models/       → schemas.py (60+ Pydantic models), orm.py (15 SQLAlchemy tables)
+  services/     → Business logic (15 files). intelligence.py is main orchestrator,
+                  auth.py for JWT, alert_connectors.py for notifications, sql_validator.py
   skills/       → PandasAI @skill functions (statistical, timeseries, profiling)
   static/       → Generated chart PNGs served via StaticFiles
+  tests/        → pytest tests with in-memory SQLite fixtures
 
 frontend/src/
-  app/          → 6 Next.js pages (chat, dashboards, datasources, glossary, alerts, admin, login)
+  app/          → 7 Next.js pages (chat, dashboards, datasources, glossary, alerts, admin, login)
   components/   → 14 React components organized by domain
     chat/       → MessageBubble, RecommendationCard, ThoughtProcess, DataQualityBanner
     ui/         → Modal, EmptyState, ToggleSwitch, StatCard, Skeleton, ChatHistory, Toast
@@ -79,9 +103,10 @@ frontend/src/
     schema/     → SchemaViewer
     export/     → ExportMenu
   hooks/        → useAnalyticsChat, useDatasources, useSchemaMap
-  lib/          → api.ts (typed fetch wrapper), chartUtils.ts
+  lib/          → api.ts (typed fetch wrapper with JWT refresh), chartUtils.ts
   types/        → index.ts (all shared TypeScript interfaces)
-  contexts/     → AuthContext.tsx
+  contexts/     → AuthContext.tsx (JWT token management)
+  test/         → vitest setup and component tests
 
 scripts/        → seed_hr_data.sql (HR dataset), run_dev.sh (legacy dev script)
 start.sh        → Start backend + frontend
@@ -89,6 +114,13 @@ stop.sh         → Stop all services
 ```
 
 ## API Endpoints
+
+### Authentication
+- `POST /auth/register` — Register new user account
+- `POST /auth/login` — Authenticate and get access/refresh tokens
+- `POST /auth/refresh` — Get new access token using refresh token
+- `POST /auth/logout` — Revoke refresh token
+- `GET /auth/me` — Get current user profile
 
 ### Chat
 - `POST /chat` — Send a query, get analysis response
@@ -111,20 +143,31 @@ stop.sh         → Stop all services
 - `GET /dashboards` — List all saved dashboards
 - `GET /dashboards/{id}` — Get a single dashboard
 - `DELETE /dashboards/{id}` — Delete a dashboard
+- `PATCH /dashboards/{id}/iterate` — Iterate on dashboard with feedback
+- `GET /dashboards/{id}/iterations` — Get iteration history
 - `POST /dashboards/email` — Send dashboard report via email (requires SMTP config)
+
+### Alerts
+- `GET/POST/PUT/DELETE /alerts` — Scheduled SQL alerts
+- `GET /alerts/{id}/connectors` — List connectors for alert
+- `POST /alerts/{id}/connectors` — Add connector (email/slack/sftp)
+- `DELETE /alerts/{id}/connectors/{connector_id}` — Remove connector
+
+### Glossary
+- `GET/POST/PUT/DELETE /glossary` — Business glossary terms with SQL formulae
 
 ### Schema
 - `GET /schema/{datasource_id}` — Introspected schema with inferred relations
 - `GET /schema/suggested-questions?datasource_id={optional}` — LLM-powered suggested questions from schema
 
-### Other
-- `GET/POST/PUT/DELETE /alerts` — Scheduled SQL alerts
-- `GET/POST/PUT/DELETE /glossary` — Business glossary terms
-- `GET /admin/logs/*` — LLM and query logs
+### Admin (requires admin role)
+- `GET /admin/logs/llm` — LLM call logs
+- `GET /admin/logs/query` — Query execution logs
 - `GET/POST /admin/cache/*` — Cache stats and clearing
-- `GET /admin/smtp` — Get SMTP configuration
-- `POST /admin/smtp` — Save/update SMTP configuration
+- `GET/POST /admin/smtp` — SMTP configuration
 - `POST /admin/smtp/test` — Test SMTP connection
+
+### Other
 - `GET /export/{conversation_id}?format=csv|pdf` — Export conversations
 
 ## Code Patterns
@@ -133,7 +176,9 @@ stop.sh         → Stop all services
 - **All Pydantic models** live in `models/schemas.py`. ORM models in `models/orm.py`.
 - **Config** is `Settings` class in `core/config.py` using `pydantic-settings`.
 - **DB sessions** are injected via FastAPI `Depends(get_db)`.
+- **Authentication** is injected via `Depends(get_current_user)` or `Depends(require_admin)`.
 - **Frontend API calls** go through `lib/api.ts` which exports a typed `api` object.
+- **JWT tokens** are stored in localStorage and auto-refreshed on 401.
 - **Pages are `"use client"`** — all pages use client-side rendering.
 - **Toast notifications** — use `useToast()` hook from `components/ui/Toast.tsx`.
 - **Design system** — custom glass-morphism dark theme with brand indigo/purple palette, surface grays.
@@ -152,29 +197,42 @@ Backend (`backend/.env`):
 - `PG_HOST/PORT/DATABASE/USERNAME/PASSWORD/SSL_MODE` — default PostgreSQL
 - `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_TOKEN` — LLM config
 - `ENCRYPTION_KEY` — Fernet key for stored passwords and SMTP credentials
+- `JWT_SECRET_KEY` — Secret key for JWT tokens (generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
 
 Frontend (`frontend/.env.local`):
 - `NEXT_PUBLIC_API_URL` — backend URL (default: `http://localhost:8000`)
 
 **Note:** SMTP configuration is managed via the Admin UI (not env vars). Stored in the `smtp_config` SQLite table with encrypted passwords.
 
+## Testing
+
+```bash
+# Backend tests
+cd backend && source .venv/bin/activate && pytest -v
+
+# Frontend tests
+cd frontend && npm test
+```
+
 ## Common Tasks
 
 - **Add a new API endpoint:** Create router in `api/`, service in `services/`, models in `schemas.py`, include router in `main.py`.
 - **Add a new page:** Create `src/app/<route>/page.tsx`. Add nav link in `layout.tsx`.
 - **Reset metadata DB:** Delete `backend/insighting_meta.db` (auto-recreated on restart).
+- **Add new user:** Use `POST /auth/register` or add directly to database.
 
 ## Gotchas
 
 - PandasAI **requires Python < 3.12**. Must use Python 3.11.
 - SQLite metadata DB is auto-created on startup. Delete it to reset.
 - Chart PNGs accumulate in `backend/app/static/charts/`.
-- `scheduler.py` uses `eval()` for threshold conditions — sandboxed but should be hardened further.
-- Login credentials: `admin` / `admin123` (hardcoded in AuthContext.tsx — replace for production).
+- Threshold conditions use `simpleeval` for safe evaluation (no `eval()`).
+- Demo users are auto-seeded on first startup.
 - **seaborn must be installed** in the backend venv — PandasAI generates code using it for correlation/scatter plots.
 - PandasAI config must whitelist `seaborn`, `scipy`, `numpy` via `custom_whitelisted_dependencies` or imports will be blocked.
 - The `/schema/suggested-questions` route must be defined BEFORE `/{datasource_id}` in schema.py to avoid FastAPI path conflicts.
 - SMTP passwords are encrypted with Fernet before storage. The `ENCRYPTION_KEY` env var must be set for this to work.
+- `JWT_SECRET_KEY` must be set in production (defaults to insecure value for development).
 
 ## HR Demo Dataset
 

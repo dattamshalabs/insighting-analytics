@@ -5,8 +5,9 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.models.orm import MessageFeedback
+from app.models.orm import MessageFeedback, User
 from app.models.schemas import (
     ChatRequest,
     ChatResponse,
@@ -28,7 +29,11 @@ router = APIRouter(tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, db: Session = Depends(get_db)):
+async def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return await process_query(
         query=req.query,
         db=db,
@@ -38,7 +43,11 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/chat/recommendations", response_model=RecommendationResponse)
-async def generate_recommendations(req: RecommendationRequest, db: Session = Depends(get_db)):
+async def generate_recommendations(
+    req: RecommendationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """On-demand recommendation generation for a specific message."""
     msg = conv_svc.get_message(db, req.message_id)
     if not msg:
@@ -71,7 +80,11 @@ async def generate_recommendations(req: RecommendationRequest, db: Session = Dep
 
 
 @router.post("/chat/feedback", response_model=FeedbackResponse)
-async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
+async def submit_feedback(
+    req: FeedbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Submit thumbs up/down feedback on a message."""
     msg = conv_svc.get_message(db, req.message_id)
     if not msg:
@@ -87,7 +100,10 @@ async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/chat/sessions", response_model=list[ConversationOut])
-async def list_sessions(db: Session = Depends(get_db)):
+async def list_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     convs = conv_svc.list_conversations(db)
     return [
         ConversationOut(
@@ -103,7 +119,10 @@ async def list_sessions(db: Session = Depends(get_db)):
 
 @router.patch("/chat/sessions/{session_id}", response_model=ConversationOut)
 async def rename_session(
-    session_id: str, req: ConversationRenameRequest, db: Session = Depends(get_db)
+    session_id: str,
+    req: ConversationRenameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     conv = conv_svc.rename_conversation(db, session_id, req.title)
     if not conv:
@@ -118,7 +137,11 @@ async def rename_session(
 
 
 @router.delete("/chat/sessions/{session_id}")
-async def delete_session(session_id: str, db: Session = Depends(get_db)):
+async def delete_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     deleted = conv_svc.delete_conversation(db, session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -126,7 +149,11 @@ async def delete_session(session_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/chat/history/{session_id}", response_model=ConversationDetailOut)
-async def get_history(session_id: str, db: Session = Depends(get_db)):
+async def get_history(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     conv = conv_svc.get_conversation_with_messages(db, session_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")

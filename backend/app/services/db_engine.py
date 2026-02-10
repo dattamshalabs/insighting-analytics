@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+import re
+from typing import Optional, Tuple
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
+
+
+def _quote_identifier(identifier: str, db_type: str) -> str:
+    """Safely quote a SQL identifier (table/column name) to prevent injection.
+
+    Different databases use different quoting characters.
+    """
+    # Validate: identifier must be alphanumeric with underscores only
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', identifier):
+        raise ValueError(f"Invalid identifier: {identifier}")
+
+    if db_type in ("postgresql",):
+        return f'"{identifier}"'
+    elif db_type in ("mysql",):
+        return f"`{identifier}`"
+    elif db_type in ("mssql",):
+        return f"[{identifier}]"
+    else:
+        return f'"{identifier}"'
 
 
 def build_connection_string(
@@ -99,18 +119,36 @@ def get_default_schema(db_type: str) -> str:
     return "public"
 
 
-def get_row_count_query(db_type: str, table_name: str) -> Optional[str]:
-    """Return a fast row count estimate query, or None if not supported."""
+def get_row_count_query(db_type: str, table_name: str) -> Tuple[Optional[str], dict]:
+    """Return a fast row count estimate query with parameters, or (None, {}) if not supported.
+
+    Returns a tuple of (query_template, params) for use with parameterized queries.
+    The table name is validated to prevent SQL injection.
+    """
+    # Validate table name to prevent injection
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
+        logger.warning("Invalid table name rejected: %s", table_name)
+        return None, {}
+
     if db_type == "postgresql":
-        return f"SELECT reltuples::bigint FROM pg_class WHERE relname = '{table_name}'"
-    elif db_type == "mysql":
+        # PostgreSQL: use parameterized query for pg_class lookup
         return (
-            f"SELECT table_rows FROM information_schema.tables "
-            f"WHERE table_schema = DATABASE() AND table_name = '{table_name}'"
+            "SELECT reltuples::bigint FROM pg_class WHERE relname = :table_name",
+            {"table_name": table_name}
+        )
+    elif db_type == "mysql":
+        # MySQL: use parameterized query for information_schema
+        return (
+            "SELECT table_rows FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = :table_name",
+            {"table_name": table_name}
         )
     elif db_type == "mssql":
+        # MSSQL: OBJECT_ID() cannot be parameterized, so we use validated identifier
+        quoted = _quote_identifier(table_name, db_type)
         return (
             f"SELECT SUM(rows) FROM sys.partitions "
-            f"WHERE object_id = OBJECT_ID('{table_name}') AND index_id IN (0, 1)"
+            f"WHERE object_id = OBJECT_ID({quoted}) AND index_id IN (0, 1)",
+            {}
         )
-    return None
+    return None, {}

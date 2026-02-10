@@ -35,6 +35,18 @@ dependencies = [
     "reportlab>=4.2",
     # Misc
     "python-dotenv>=1.0",
+    # Security
+    "simpleeval>=0.9",
+    "slowapi>=0.1",
+    "python-magic>=0.4",
+    # Authentication
+    "passlib[bcrypt]>=1.7",
+    "python-jose[cryptography]>=3.3",
+    "email-validator>=2.1",
+    # Alert connectors
+    "paramiko>=3.4",
+    # SQL parsing
+    "sqlparse>=0.5",
 ]
 
 [project.optional-dependencies]

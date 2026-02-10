@@ -3,8 +3,9 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_admin
 from app.core.database import get_db
-from app.models.orm import LLMCallLog, QueryLog, SmtpConfig
+from app.models.orm import LLMCallLog, QueryLog, SmtpConfig, User
 from app.models.schemas import LLMLogOut, QueryLogOut, SmtpConfigCreate, SmtpConfigOut
 from app.services import cache as cache_svc
 from app.services import email_service
@@ -13,7 +14,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.get("/logs/llm", response_model=list[LLMLogOut])
-async def llm_logs(limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+async def llm_logs(
+    limit: int = Query(100, le=500),
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
     rows = db.query(LLMCallLog).order_by(LLMCallLog.created_at.desc()).limit(limit).all()
     return [
         LLMLogOut(
@@ -26,7 +31,11 @@ async def llm_logs(limit: int = Query(100, le=500), db: Session = Depends(get_db
 
 
 @router.get("/logs/query", response_model=list[QueryLogOut])
-async def query_logs(limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+async def query_logs(
+    limit: int = Query(100, le=500),
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
     rows = db.query(QueryLog).order_by(QueryLog.created_at.desc()).limit(limit).all()
     return [
         QueryLogOut(
@@ -39,12 +48,12 @@ async def query_logs(limit: int = Query(100, le=500), db: Session = Depends(get_
 
 
 @router.get("/cache/stats")
-async def cache_stats():
+async def cache_stats(admin_user: User = Depends(require_admin)):
     return cache_svc.stats()
 
 
 @router.post("/cache/clear")
-async def clear_cache():
+async def clear_cache(admin_user: User = Depends(require_admin)):
     cache_svc.clear_all()
     return {"status": "cleared"}
 
@@ -54,7 +63,10 @@ async def clear_cache():
 # ---------------------------------------------------------------------------
 
 @router.get("/smtp", response_model=SmtpConfigOut | None)
-async def get_smtp_config(db: Session = Depends(get_db)):
+async def get_smtp_config(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
     """Get current SMTP configuration."""
     cfg = db.query(SmtpConfig).first()
     if not cfg:
@@ -66,7 +78,11 @@ async def get_smtp_config(db: Session = Depends(get_db)):
 
 
 @router.post("/smtp", response_model=SmtpConfigOut)
-async def save_smtp_config(body: SmtpConfigCreate, db: Session = Depends(get_db)):
+async def save_smtp_config(
+    body: SmtpConfigCreate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
     """Create or update SMTP configuration."""
     existing = db.query(SmtpConfig).first()
 
@@ -112,7 +128,10 @@ async def save_smtp_config(body: SmtpConfigCreate, db: Session = Depends(get_db)
 
 
 @router.post("/smtp/test")
-async def test_smtp(db: Session = Depends(get_db)):
+async def test_smtp(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
     """Test SMTP connection."""
     result = email_service.test_smtp_connection(db)
     if result["status"] == "error":

@@ -68,13 +68,13 @@ def introspect(datasource_id: str, connection_string: str, db_type: str = "postg
         except Exception:
             pass  # Some databases may not support FK introspection
 
-        # Row count (fast estimate)
+        # Row count (fast estimate, using parameterized query)
         row_count = None
-        count_query = get_row_count_query(db_type, table_name)
+        count_query, query_params = get_row_count_query(db_type, table_name)
         if count_query:
             try:
                 with engine.connect() as conn:
-                    result = conn.execute(text(count_query))
+                    result = conn.execute(text(count_query), query_params)
                     row = result.fetchone()
                     if row:
                         row_count = max(int(row[0]), 0)

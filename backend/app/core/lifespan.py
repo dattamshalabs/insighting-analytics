@@ -18,6 +18,15 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing metadata database...")
     init_db()
 
+    logger.info("Seeding demo users...")
+    from app.core.database import SessionLocal
+    from app.services.seed_users import seed_demo_users
+    db = SessionLocal()
+    try:
+        seed_demo_users(db)
+    finally:
+        db.close()
+
     logger.info("Starting scheduler...")
     from app.services.scheduler import start_scheduler
     start_scheduler()

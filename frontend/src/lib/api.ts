@@ -1,16 +1,76 @@
 // API client for the backend
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const ACCESS_TOKEN_KEY = "insighting_access_token";
+const REFRESH_TOKEN_KEY = "insighting_refresh_token";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+function getAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) {
+      // Clear tokens on refresh failure
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      return null;
+    }
+
+    const data = await res.json();
+    localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token);
+    localStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
+async function request<T>(path: string, options?: RequestInit, retry = true): Promise<T> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
+    headers,
   });
+
+  // Handle 401 - try to refresh token
+  if (res.status === 401 && retry) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      // Retry the request with new token
+      return request<T>(path, options, false);
+    }
+    // Redirect to login if refresh failed
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error("Session expired. Please log in again.");
+  }
+
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`API ${res.status}: ${body}`);
   }
+
   if (res.status === 204) return undefined as T;
   return res.json();
 }
@@ -87,13 +147,37 @@ export const api = {
     request<void>(`/datasources/${id}`, { method: "DELETE" }),
 
   uploadDatasource: async (file: File, name?: string) => {
+    const token = getAccessToken();
     const formData = new FormData();
     formData.append("file", file);
     if (name) formData.append("name", name);
+
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
     const res = await fetch(`${API_URL}/datasources/upload`, {
       method: "POST",
+      headers,
       body: formData,
     });
+
+    if (res.status === 401) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        headers.Authorization = `Bearer ${newToken}`;
+        const retryRes = await fetch(`${API_URL}/datasources/upload`, {
+          method: "POST",
+          headers,
+          body: formData,
+        });
+        if (!retryRes.ok) throw new Error(`Upload failed: ${retryRes.status}`);
+        return retryRes.json() as Promise<Datasource>;
+      }
+      throw new Error("Session expired. Please log in again.");
+    }
+
     if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
     return res.json() as Promise<Datasource>;
   },
@@ -180,6 +264,15 @@ export const api = {
   deleteDashboard: (id: string) =>
     request<void>(`/dashboards/${id}`, { method: "DELETE" }),
 
+  iterateDashboard: (id: string, feedback: string) =>
+    request<DashboardResponse>(`/dashboards/${id}/iterate`, {
+      method: "PATCH",
+      body: JSON.stringify({ feedback }),
+    }),
+
+  getDashboardIterations: (id: string) =>
+    request<DashboardIteration[]>(`/dashboards/${id}/iterations`),
+
   sendDashboardEmail: (dashboardId: string, recipients: string[], subject?: string) =>
     request<{ status: string; message: string }>("/dashboards/email", {
       method: "POST",
@@ -218,4 +311,12 @@ export interface DashboardResponse {
   widgets: DashboardWidget[];
   created_at: string;
   updated_at: string;
+}
+
+export interface DashboardIteration {
+  id: string;
+  dashboard_id: string;
+  iteration_number: number;
+  feedback: string;
+  created_at: string;
 }

@@ -7,24 +7,40 @@ import { SparklesIcon } from "@heroicons/react/24/solid";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setError(null);
     setLoading(true);
-    // Simulate a brief delay for UX
-    await new Promise((r) => setTimeout(r, 300));
-    if (login(username, password)) {
-      router.push("/");
-    } else {
-      setError(true);
+
+    try {
+      let success: boolean;
+      if (isRegister) {
+        success = await register(email, password);
+        if (!success) {
+          setError("Registration failed. Email may already be in use.");
+        }
+      } else {
+        success = await login(email, password);
+        if (!success) {
+          setError("Invalid email or password");
+        }
+      }
+
+      if (success) {
+        router.push("/");
+      }
+    } catch (err) {
+      setError("An error occurred. Please try again.");
+    } finally {
       setLoading(false);
-      setTimeout(() => setError(false), 600);
     }
   };
 
@@ -54,13 +70,13 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-500 mb-1.5">Username</label>
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5">Email</label>
             <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="input-glass w-full"
-              placeholder="Enter username"
+              placeholder="Enter your email"
               required
               autoFocus
             />
@@ -74,6 +90,7 @@ export default function LoginPage() {
               className="input-glass w-full"
               placeholder="Enter password"
               required
+              minLength={8}
             />
           </div>
 
@@ -83,7 +100,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, y: 0 }}
               className="text-red-400 text-xs text-center"
             >
-              Invalid credentials
+              {error}
             </motion.p>
           )}
 
@@ -94,13 +111,37 @@ export default function LoginPage() {
           >
             {loading ? (
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : isRegister ? (
+              "Create Account"
             ) : (
               "Sign In"
             )}
           </button>
         </form>
 
-        <p className="text-[10px] text-zinc-700 text-center mt-6">
+        <div className="mt-4 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setIsRegister(!isRegister);
+              setError(null);
+            }}
+            className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            {isRegister ? "Already have an account? Sign in" : "Need an account? Register"}
+          </button>
+        </div>
+
+        {/* Demo credentials hint */}
+        <div className="mt-6 p-3 bg-surface-200/50 rounded-lg border border-white/[0.04]">
+          <p className="text-[10px] text-zinc-500 text-center mb-2">Demo Credentials</p>
+          <div className="text-[10px] text-zinc-600 space-y-1">
+            <p><span className="text-zinc-500">User:</span> demo@insighting.ai / demo2024!</p>
+            <p><span className="text-zinc-500">Admin:</span> admin@insighting.ai / admin2024!</p>
+          </div>
+        </div>
+
+        <p className="text-[10px] text-zinc-700 text-center mt-4">
           Powered by Ollama
         </p>
       </motion.div>

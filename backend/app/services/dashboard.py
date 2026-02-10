@@ -13,8 +13,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.orm import Dashboard, Datasource
-from app.models.schemas import DashboardOut, DashboardWidget
+from app.models.orm import Dashboard, DashboardIteration, Datasource
+from app.models.schemas import DashboardIterationOut, DashboardOut, DashboardWidget
 from app.services.db_engine import build_connection_string, get_default_schema
 
 logger = logging.getLogger(__name__)
@@ -286,3 +286,157 @@ def delete_dashboard(db: Session, dashboard_id: str) -> bool:
     db.delete(d)
     db.commit()
     return True
+
+
+async def iterate_dashboard(
+    dashboard_id: str,
+    feedback: str,
+    db: Session,
+) -> Optional[DashboardOut]:
+    """Iterate on a dashboard based on user feedback."""
+    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
+    if not dashboard:
+        return None
+
+    # Get current widgets
+    try:
+        current_widgets = json.loads(dashboard.widgets_json or "[]")
+    except Exception:
+        current_widgets = []
+
+    # Load datasource context if available
+    data_context = ""
+    if dashboard.datasource_id:
+        ds = db.query(Datasource).filter(Datasource.id == dashboard.datasource_id).first()
+        if ds:
+            sample = _load_sample_data(ds)
+            if sample.get("tables"):
+                ctx_parts = []
+                for t in sample["tables"]:
+                    cols = ", ".join(t.get("columns", []))
+                    ctx_parts.append(f"Table '{t['name']}': columns [{cols}]")
+                data_context = "\n".join(ctx_parts)
+
+    # Build iteration prompt
+    llm_prompt = f"""You are an analytics dashboard generator. The user has an existing dashboard and wants to improve it based on their feedback.
+
+Current dashboard widgets:
+{json.dumps(current_widgets, default=str, indent=2)}
+
+Original prompt: {dashboard.prompt or "N/A"}
+
+Dataset info:
+{data_context or "No specific dataset info available."}
+
+User feedback: {feedback}
+
+Based on the feedback, generate an IMPROVED version of the dashboard. Respond with ONLY a valid JSON array of widgets.
+
+Each widget must have:
+- "id": unique string
+- "type": one of "kpi", "bar", "line", "area", "pie", "table", "insight"
+- "title": descriptive title
+- "data": the data for the widget
+- "config": optional config
+
+You may:
+- Keep existing widgets that are still relevant (keep their IDs)
+- Modify widgets based on feedback
+- Add new widgets
+- Remove widgets that don't add value
+
+Respond with ONLY a valid JSON array of widgets, nothing else."""
+
+    # Call LLM
+    new_widgets = []
+    try:
+        headers = {"Content-Type": "application/json"}
+        if settings.ollama_api_token:
+            headers["Authorization"] = f"Bearer {settings.ollama_api_token}"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": settings.ollama_model,
+                    "messages": [{"role": "user", "content": llm_prompt}],
+                    "temperature": 0.3,
+                },
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+
+            # Parse JSON from response
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                content = content.strip()
+
+            raw_widgets = json.loads(content)
+            if isinstance(raw_widgets, dict) and "widgets" in raw_widgets:
+                raw_widgets = raw_widgets["widgets"]
+
+            for w in raw_widgets[:8]:
+                new_widgets.append(DashboardWidget(
+                    id=w.get("id", str(uuid.uuid4())[:8]),
+                    type=w.get("type", "insight"),
+                    title=w.get("title", "Untitled"),
+                    data=w.get("data"),
+                    config=w.get("config", {}),
+                ))
+    except Exception as e:
+        logger.error("Dashboard iteration failed: %s", e)
+        return None
+
+    # Calculate iteration number
+    iteration_count = db.query(DashboardIteration).filter(
+        DashboardIteration.dashboard_id == dashboard_id
+    ).count()
+
+    # Save iteration history
+    iteration = DashboardIteration(
+        dashboard_id=dashboard_id,
+        iteration_number=iteration_count + 1,
+        feedback=feedback,
+        previous_widgets_json=dashboard.widgets_json,
+        new_widgets_json=json.dumps([w.model_dump() for w in new_widgets], default=str),
+    )
+    db.add(iteration)
+
+    # Update dashboard
+    dashboard.widgets_json = json.dumps([w.model_dump() for w in new_widgets], default=str)
+    db.commit()
+    db.refresh(dashboard)
+
+    return DashboardOut(
+        id=dashboard.id,
+        title=dashboard.title,
+        datasource_id=dashboard.datasource_id,
+        prompt=dashboard.prompt,
+        widgets=new_widgets,
+        created_at=dashboard.created_at,
+        updated_at=dashboard.updated_at,
+    )
+
+
+def get_iterations(db: Session, dashboard_id: str) -> List[DashboardIterationOut]:
+    """Get iteration history for a dashboard."""
+    iterations = (
+        db.query(DashboardIteration)
+        .filter(DashboardIteration.dashboard_id == dashboard_id)
+        .order_by(DashboardIteration.iteration_number.desc())
+        .all()
+    )
+    return [
+        DashboardIterationOut(
+            id=i.id,
+            dashboard_id=i.dashboard_id,
+            iteration_number=i.iteration_number,
+            feedback=i.feedback,
+            created_at=i.created_at,
+        )
+        for i in iterations
+    ]

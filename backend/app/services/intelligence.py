@@ -218,9 +218,23 @@ def _build_system_prompt(datasource_id: Optional[str], glossary_terms: list[dict
             parts.append(schema_ctx)
 
     if glossary_terms:
-        gl = ["Business glossary:"]
+        gl = [
+            "Business glossary (use these definitions when the user mentions these terms):",
+            "Format: term [type, returns type] = SQL expression",
+        ]
         for g in glossary_terms:
-            gl.append(f"  \"{g['term']}\" = {g['sql_expression']}")
+            formula_type = g.get('formula_type', 'expression')
+            result_type = g.get('result_type', 'numeric')
+            desc = f" -- {g['description']}" if g.get('description') else ""
+            gl.append(f"  \"{g['term']}\" [{formula_type}, returns {result_type}] = {g['sql_expression']}{desc}")
+
+        gl.append("")
+        gl.append("Usage instructions:")
+        gl.append("  - 'expression': A SQL fragment that can be used in SELECT, WHERE, etc.")
+        gl.append("  - 'calculation': A computed value, often an aggregate (SUM, AVG, COUNT)")
+        gl.append("  - 'metric': A business KPI, typically a ratio or percentage")
+        gl.append("  When a user asks about a glossary term, substitute its SQL expression.")
+
         parts.append("\n".join(gl))
 
     return "\n\n".join(parts)
@@ -242,10 +256,19 @@ async def process_query(
     # 2. Get conversation history for LLM context
     history = conv_svc.get_context_messages(db, conv.id)
 
-    # 3. Load glossary terms
+    # 3. Load glossary terms with enhanced metadata
     from app.models.orm import GlossaryTerm
     glossary_rows = db.query(GlossaryTerm).all()
-    glossary_terms = [{"term": g.term, "sql_expression": g.sql_expression} for g in glossary_rows]
+    glossary_terms = [
+        {
+            "term": g.term,
+            "sql_expression": g.sql_expression,
+            "description": g.description,
+            "formula_type": g.formula_type or "expression",
+            "result_type": g.result_type or "numeric",
+        }
+        for g in glossary_rows
+    ]
 
     # 4. Build LLM + load DataFrames from specified datasource or defaults
     llm = _build_llm()

@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # --- Encryption (Fernet key for datasource credentials) ---
     encryption_key: Optional[str] = None  # generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
+    # --- JWT Authentication ---
+    jwt_secret_key: str = "change-me-in-production"  # generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+
     # --- SMTP (optional, admin-configurable via API) ---
     smtp_host: Optional[str] = None
     smtp_port: int = 587
