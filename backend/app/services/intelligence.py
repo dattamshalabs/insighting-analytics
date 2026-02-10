@@ -350,6 +350,7 @@ async def process_query(
     # Record start time to filter only charts generated during this query
     import time
     query_start_time = time.time()
+    query_duration_ms = 0
 
     with obs_svc.track_latency("pandasai_query") as timing:
         try:
@@ -363,6 +364,9 @@ async def process_query(
             conv_svc.add_message(db, conv.id, "assistant", answer)
             return ChatResponse(session_id=conv.id, answer=answer)
 
+    # Capture timing after with block exits (when elapsed_ms is populated)
+    query_duration_ms = timing.get("elapsed_ms", 0)
+
     answer = str(result) if result is not None else "No result returned."
 
     # Try to extract generated code from PandasAI internals
@@ -372,24 +376,32 @@ async def process_query(
             generated_code = last_code
             # Try to extract SQL from the generated code
             generated_sql = _extract_sql_from_code(last_code)
-    except Exception:
-        pass
+            logger.debug("Generated code:\n%s", last_code)
+            logger.debug("Extracted SQL: %s", generated_sql)
+    except Exception as ex:
+        logger.warning("Failed to extract code from PandasAI: %s", ex)
 
     # Log the query execution for admin observability
-    if generated_sql:
-        try:
-            rows_returned = None
-            if isinstance(result, pd.DataFrame):
-                rows_returned = len(result)
+    # Always log if we have either SQL or generated code
+    try:
+        rows_returned = None
+        if isinstance(result, pd.DataFrame):
+            rows_returned = len(result)
+
+        # Log SQL if extracted, otherwise log the generated code as the "query"
+        sql_to_log = generated_sql or (generated_code[:1000] if generated_code else None)
+        if sql_to_log:
             obs_svc.log_query(
                 db,
                 datasource_id=datasource_id,
-                sql=generated_sql,
+                sql=sql_to_log,
                 rows_returned=rows_returned,
-                duration_ms=timing.get("elapsed_ms", 0),
+                duration_ms=query_duration_ms,
             )
-        except Exception as e:
-            logger.warning("Failed to log query: %s", e)
+            logger.info("Query logged: %s chars, %s rows, %.2f ms",
+                       len(sql_to_log), rows_returned, query_duration_ms)
+    except Exception as e:
+        logger.warning("Failed to log query: %s", e)
 
     # Check for chart — PandasAI saves temp charts to {project_root}/exports/charts/
     # Only include charts generated AFTER query_start_time to avoid returning stale charts

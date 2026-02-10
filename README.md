@@ -1,6 +1,8 @@
 # Insighting Analytics
 
-A production-grade, local-first analytics platform that lets you **chat with your PostgreSQL databases using natural language**. Powered entirely by FOSS: [PandasAI](https://github.com/sinaptik-ai/pandas-ai), [Ollama](https://ollama.com), FastAPI, and Next.js.
+**Version 0.5.0** | February 2026
+
+A production-grade, local-first analytics platform that lets you **chat with your databases using natural language**. Powered entirely by FOSS: [PandasAI](https://github.com/sinaptik-ai/pandas-ai), [Ollama](https://ollama.com), FastAPI, and Next.js.
 
 Ask questions like *"What were our top 10 customers by revenue last quarter?"* and get back SQL, results, charts, data quality warnings, and actionable recommendations — all from a single chat interface.
 
@@ -11,21 +13,27 @@ Ask questions like *"What were our top 10 customers by revenue last quarter?"* a
 | Category | What it does |
 |---|---|
 | **Natural Language to SQL** | Ask questions in plain English; PandasAI + Ollama generate and execute SQL |
+| **View SQL Query** | See the generated SQL for every response with a prominent "View SQL Query" button |
+| **JWT Authentication** | Secure login with access tokens (30 min) + refresh tokens (7 days); bcrypt password hashing |
 | **Auto Schema Discovery** | Introspects `information_schema`, detects foreign keys, infers joins by naming convention |
 | **Dynamic Suggested Questions** | LLM-powered suggested questions generated from your actual schema — auto-refreshes when datasources change |
+| **Dynamic Dashboard Prompts** | AI generates dashboard suggestions based on selected datasource's schema |
 | **AI Dashboards** | Generate dashboards with KPI cards, charts, tables, and AI insights from a prompt |
+| **Dashboard Iteration** | Iterate on dashboards with feedback; iteration history tracked |
 | **Dashboard Tabs** | Browse multiple dashboards via horizontal tab navigation; email any dashboard as a report |
 | **Email Reports (SMTP)** | Send dashboard reports via email with configurable SMTP; admin UI for setup |
+| **Alert Connectors** | Send alerts via Email, Slack webhook, or SFTP |
 | **Data Quality Validation** | Checks null rates, outliers (IQR), freshness, type consistency, volume sanity on every query |
 | **Action Recommendations** | Second LLM call generates prioritized business recommendations from analysis results |
 | **Conversation Memory** | Persistent sessions stored in SQLite; follow-up questions use prior context |
 | **Multi-Datasource** | Connect PostgreSQL, MySQL, MSSQL, Databricks, CSV, and Excel; credentials encrypted at rest (Fernet) |
-| **Business Glossary** | Map terms like "revenue" to SQL expressions; injected into every LLM prompt |
+| **Business Glossary** | Map terms like "revenue" to SQL expressions with formula types and dependencies |
 | **Statistical Skills** | ANOVA, anomaly detection, correlation matrix — invoked automatically when relevant |
 | **Time-Series Skills** | Trend decomposition, exponential smoothing forecast, period-over-period comparison |
 | **Exports** | Download any conversation as PDF or CSV |
 | **Scheduled Alerts** | Cron-based SQL queries with threshold conditions; fires webhooks when triggered |
 | **Observability** | Logs every LLM call (tokens, latency) and SQL query; viewable in admin dashboard |
+| **Security Hardened** | Rate limiting (100/min), safe eval, SQL injection prevention, file validation |
 | **Guardrails** | Read-only enforcement, 30s query timeout, 10K row cap, PII regex masking |
 | **Caching** | In-memory TTL cache for query results and LLM responses |
 | **HR Demo Dataset** | 7-table People Analytics dataset (4,450 rows) with realistic correlations for out-of-the-box exploration |
@@ -146,6 +154,16 @@ Backend: http://localhost:8000 | Frontend: http://localhost:3000 | API docs: htt
 
 ## API Reference
 
+### Authentication
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/auth/register` | Register a new user account |
+| `POST` | `/auth/login` | Authenticate and get JWT tokens |
+| `POST` | `/auth/refresh` | Refresh access token |
+| `POST` | `/auth/logout` | Revoke refresh token |
+| `GET` | `/auth/me` | Get current user profile |
+
+### Chat
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
@@ -156,27 +174,56 @@ Backend: http://localhost:8000 | Frontend: http://localhost:3000 | API docs: htt
 | `POST` | `/chat/feedback` | Submit thumbs up/down on a message |
 | `PATCH` | `/chat/sessions/{id}` | Rename a conversation |
 | `DELETE` | `/chat/sessions/{id}` | Delete a conversation |
+
+### Datasources
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/datasources` | List connected datasources |
 | `POST` | `/datasources` | Register a database connection |
 | `POST` | `/datasources/upload` | Upload CSV/Excel file as datasource |
 | `DELETE` | `/datasources/{id}` | Remove a datasource |
 | `POST` | `/datasources/{id}/refresh-schema` | Re-introspect schema |
+
+### Dashboards
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/dashboards/suggested-prompts` | AI-generated dashboard prompts based on schema |
 | `POST` | `/dashboards/generate` | Generate AI dashboard from prompt |
 | `GET` | `/dashboards` | List all saved dashboards |
 | `GET` | `/dashboards/{id}` | Get a single dashboard |
 | `DELETE` | `/dashboards/{id}` | Delete a dashboard |
+| `PATCH` | `/dashboards/{id}/iterate` | Iterate on dashboard with feedback |
+| `GET` | `/dashboards/{id}/iterations` | Get iteration history |
 | `POST` | `/dashboards/email` | Email a dashboard report via SMTP |
+
+### Schema
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/schema/{datasource_id}` | Get schema map with inferred relations |
 | `GET` | `/schema/suggested-questions` | LLM-powered suggested questions from schema |
-| `GET` | `/export/{conversation_id}?format=csv\|pdf` | Export conversation |
+
+### Alerts
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/alerts` | List scheduled alerts |
 | `POST` | `/alerts` | Create an alert |
 | `PUT` | `/alerts/{id}` | Update an alert |
 | `DELETE` | `/alerts/{id}` | Delete an alert |
+| `GET` | `/alerts/{id}/connectors` | List alert connectors |
+| `POST` | `/alerts/{id}/connectors` | Add connector (email/slack/sftp) |
+| `DELETE` | `/alerts/{id}/connectors/{cid}` | Remove a connector |
+
+### Glossary
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/glossary` | List business glossary terms |
 | `POST` | `/glossary` | Create a glossary term |
 | `PUT` | `/glossary/{id}` | Update a glossary term |
 | `DELETE` | `/glossary/{id}` | Delete a glossary term |
+
+### Admin
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/admin/logs/llm` | LLM call logs |
 | `GET` | `/admin/logs/query` | SQL query execution logs |
 | `GET` | `/admin/cache/stats` | Cache hit/miss statistics |
@@ -184,6 +231,11 @@ Backend: http://localhost:8000 | Frontend: http://localhost:3000 | API docs: htt
 | `GET` | `/admin/smtp` | Get SMTP configuration |
 | `POST` | `/admin/smtp` | Save/update SMTP configuration |
 | `POST` | `/admin/smtp/test` | Test SMTP connection |
+
+### Export
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/export/{conversation_id}?format=csv\|pdf` | Export conversation |
 
 Interactive API docs are available at `/docs` (Swagger) and `/redoc` when the backend is running.
 

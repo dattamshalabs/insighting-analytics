@@ -1,6 +1,6 @@
 # High-Level Design (HLD) — Insighting Analytics
 
-**Version:** 0.4.0
+**Version:** 0.5.0
 **Date:** February 2026
 
 ---
@@ -101,6 +101,10 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 | Lightweight markdown renderer | Custom regex-based renderer — no react-markdown dependency. |
 | Client-rendered pages | Simpler deployment (no SSR concerns). All data via REST API. |
 | Glass-morphism design | Premium, modern aesthetic. Consistent brand language. |
+| View SQL Query | Transparency — users can see exactly what SQL was generated. |
+| Dynamic Dashboard Prompts | LLM generates dashboard suggestions from actual schema. |
+| JWT Authentication | Stateless auth with refresh tokens for long sessions. |
+| Rate Limiting | Protection against abuse, DDoS mitigation. |
 
 ---
 
@@ -120,12 +124,15 @@ Insighting Analytics is a full-stack AI-powered natural language analytics platf
 
 ## 6. Security Architecture
 
-- **Authentication:** Session-based (credentials in AuthContext — production should use JWT)
-- **Credential Storage:** Fernet encryption for datasource passwords
-- **SQL Guardrails:** Read-only enforcement, query timeout, row limits
+- **Authentication:** JWT-based with access tokens (30 min) + refresh tokens (7 days)
+- **Password Storage:** bcrypt hashing for user passwords
+- **Credential Storage:** Fernet encryption for datasource passwords and SMTP credentials
+- **Rate Limiting:** 100 requests/minute per IP (slowapi)
+- **SQL Guardrails:** Read-only enforcement, query timeout (30s), row limits (10K)
 - **PII Masking:** Automatic regex-based masking of emails, phone numbers, SSNs
-- **CORS:** Configurable allowed origins
-- **File Uploads:** Extension validation (.csv, .xlsx, .xls only)
+- **CORS:** Configurable allowed origins with restricted headers
+- **File Uploads:** Magic number validation, 50MB size limit, extension validation
+- **Input Validation:** Pydantic field constraints, cron expression validation
 
 ---
 

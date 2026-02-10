@@ -39,7 +39,11 @@ Services will be available at:
 - **Backend API:** http://localhost:8000
 - **API Docs:** http://localhost:8000/docs
 
-**Login credentials:** `admin` / `admin123`
+**Demo Credentials:**
+| Role | Email | Password |
+|------|-------|----------|
+| User | `demo@insighting.ai` | `demo2024!` |
+| Admin | `admin@insighting.ai` | `admin2024!` |
 
 To stop all services:
 ```bash
@@ -164,11 +168,11 @@ npm run dev &
 
 | Check | Command / URL | Expected |
 |---|---|---|
-| Backend health | `curl http://localhost:8000/health` | `{"status":"ok","version":"0.2.0"}` |
+| Backend health | `curl http://localhost:8000/health` | `{"status":"ok","version":"0.5.0"}` |
 | API docs | http://localhost:8000/docs | Swagger UI loads |
 | Frontend | http://localhost:3000 | Login page loads |
 
-**Login credentials:** `admin` / `admin123`
+**Demo Credentials:** `demo@insighting.ai` / `demo2024!` or `admin@insighting.ai` / `admin2024!`
 
 ---
 
@@ -261,11 +265,16 @@ The PG credentials in `backend/.env` are used as the default datasource.
 
 ## Features
 
+- **JWT Authentication** — secure login with access tokens (30 min) + refresh tokens (7 days)
 - **Natural language analytics** — ask questions about your data in plain English
+- **View SQL Query** — see the generated SQL for every response
 - **Multi-database support** — PostgreSQL, MySQL, MSSQL, Databricks, CSV, Excel
 - **AI dashboards** — generate dashboards with KPI cards, charts, tables, and formatted AI insights
+- **Dynamic dashboard prompts** — AI suggests dashboards based on your datasource schema
+- **Dashboard iteration** — refine dashboards with feedback; track iteration history
 - **Dashboard tabs** — browse multiple dashboards via horizontal tab navigation
 - **Email reports** — send dashboard reports via email with configurable SMTP (Admin > SMTP)
+- **Alert connectors** — send alerts via Email, Slack webhook, or SFTP
 - **Dynamic suggested questions** — LLM generates contextual questions from your actual schema
 - **On-demand recommendations** — click "Get AI Recommendations" on any response for business insights
 - **Statistical analysis** — significance tests, time series analysis, data profiling
@@ -273,9 +282,10 @@ The PG credentials in `backend/.env` are used as the default datasource.
 - **Message feedback** — thumbs up/down on responses for quality tracking
 - **Conversation management** — search, rename, delete chat sessions
 - **Export** — download conversations as CSV or PDF
-- **Business glossary** — define terms so the AI understands your domain
+- **Business glossary** — define terms with formula types and dependencies
 - **Scheduled alerts** — set up SQL-based alerts with cron schedules
 - **Schema introspection** — auto-discovers tables, columns, types, and relationships
+- **Security hardened** — rate limiting, safe eval, SQL injection prevention, input validation
 - **HR demo dataset** — 7-table People Analytics dataset (4,450 rows) included for out-of-the-box exploration
 
 ---

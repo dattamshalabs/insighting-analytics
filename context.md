@@ -199,7 +199,45 @@ A comprehensive UI/UX overhaul + feature expansion of the Insighting Analytics p
 
 ---
 
-### 6. v0.4.0 — HR Dataset, Dynamic Questions, Email, Dashboard Tabs, Markdown Insights
+### 6. v0.5.0 — Security, Authentication, View SQL, Dynamic Dashboard Prompts, Query Logging
+
+**Security Hardening:**
+- JWT authentication with access tokens (30 min) + refresh tokens (7 days)
+- bcrypt password hashing for user accounts
+- Rate limiting (100 requests/minute) via slowapi
+- File upload validation (magic number detection, 50MB limit)
+- Input validation with Pydantic field constraints
+- Restricted CORS headers
+
+**Authentication System:**
+- `User` and `RefreshToken` ORM models added
+- Auth service with JWT token generation and verification
+- Protected endpoints require `Authorization: Bearer <token>` header
+- Demo credentials: `demo@insighting.ai` / `demo2024!`, `admin@insighting.ai` / `admin2024!`
+
+**View SQL Query Feature:**
+- Added `_extract_sql_from_code()` function to parse SQL from PandasAI generated Python code
+- Prominent "View SQL Query" button styled to match recommendations button (cyan theme)
+- Supports: `pd.read_sql()`, `pd.read_sql_query()`, variable assignments, f-strings
+
+**Dynamic Dashboard Prompts:**
+- Added `/dashboards/suggested-prompts` endpoint
+- LLM generates 4 dashboard prompts based on selected datasource schema
+- Cached for 30 minutes, falls back to generic prompts
+
+**Query Logging Fix:**
+- Fixed timing bug in query logging (elapsed_ms captured after with block)
+- Now logs generated code when SQL extraction fails
+- Admin panel shows executed queries with duration and row counts
+
+**Chart Timestamp Fix:**
+- Records `query_start_time` before PandasAI execution
+- Only returns charts with mtime >= query_start_time
+- Prevents stale charts from previous queries
+
+---
+
+### 7. v0.4.0 — HR Dataset, Dynamic Questions, Email, Dashboard Tabs, Markdown Insights
 
 **`scripts/seed_hr_data.sql`** (NEW)
 - 7-table HR/People Analytics dataset: employees (500), employee_attrition (150), performance_ratings (1000), employee_recognition (300), pulse_surveys (2000), employee_learning (400), employee_promotions (100)
