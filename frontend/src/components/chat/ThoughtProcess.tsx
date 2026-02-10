@@ -32,10 +32,13 @@ export function ThoughtProcess({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-zinc-400 transition-colors py-1 px-2 rounded-lg hover:bg-white/[0.03]"
+        className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs
+          bg-cyan-500/5 border border-cyan-500/10 text-cyan-400
+          hover:bg-cyan-500/10 hover:border-cyan-500/20
+          transition-all"
       >
         <CodeBracketIcon className="w-3.5 h-3.5" />
-        <span>{open ? "Hide" : "Show"} thought process</span>
+        <span>{open ? "Hide SQL & Code" : "View SQL Query"}</span>
         <ChevronDownIcon
           className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`}
         />

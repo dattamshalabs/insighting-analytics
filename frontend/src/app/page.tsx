@@ -341,18 +341,20 @@ export default function ChatPage() {
                     </div>
                   )}
 
-                  {msg.role === "assistant" && (msg.generated_sql || msg.generated_code) && (
-                    <div className="mt-2">
-                      <ThoughtProcess sql={msg.generated_sql} code={msg.generated_code} />
-                    </div>
-                  )}
-
-                  {/* Recommendation prompt - lazy loaded */}
+                  {/* Action buttons row - View SQL and Get Recommendations */}
                   {msg.role === "assistant" && (
-                    <RecommendationCard
-                      message={msg}
-                      onFetchRecommendations={fetchRecommendations}
-                    />
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {/* View SQL button - more prominent */}
+                      {(msg.generated_sql || msg.generated_code) && (
+                        <ThoughtProcess sql={msg.generated_sql} code={msg.generated_code} />
+                      )}
+
+                      {/* Recommendation prompt - lazy loaded */}
+                      <RecommendationCard
+                        message={msg}
+                        onFetchRecommendations={fetchRecommendations}
+                      />
+                    </div>
                   )}
                 </motion.div>
               ))}

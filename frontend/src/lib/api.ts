@@ -273,6 +273,11 @@ export const api = {
   getDashboardIterations: (id: string) =>
     request<DashboardIteration[]>(`/dashboards/${id}/iterations`),
 
+  getDashboardPrompts: (datasourceId?: string) => {
+    const qs = datasourceId ? `?datasource_id=${datasourceId}` : "";
+    return request<{ prompts: string[] }>(`/dashboards/suggested-prompts${qs}`);
+  },
+
   sendDashboardEmail: (dashboardId: string, recipients: string[], subject?: string) =>
     request<{ status: string; message: string }>("/dashboards/email", {
       method: "POST",

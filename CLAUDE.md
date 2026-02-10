@@ -59,9 +59,11 @@ Demo users are auto-created on first startup:
 - **Guardrails are non-optional** — read-only SQL, timeout, row limits, PII masking.
 - **Schema context injection** — auto-introspects database schemas and infers relations.
 - **On-demand recommendations** — recommendations are NOT generated automatically. Users click "Get AI Recommendations" button which triggers a separate LLM call via `POST /chat/recommendations`.
+- **View SQL Query** — Chat responses include a "View SQL Query" button that shows the extracted SQL and generated Python code. SQL is extracted from PandasAI's generated code.
 - **Multi-database support** — PostgreSQL, MySQL, MS SQL Server, Databricks, CSV, and Excel file uploads.
 - **Message feedback** — thumbs up/down on responses stored via `POST /chat/feedback`.
 - **Dynamic suggested questions** — LLM generates 6 analytical questions based on the actual database schema. Cached for 30 min. Falls back to generic questions if LLM is unavailable.
+- **Dynamic dashboard prompts** — Dashboard creation modal shows AI-generated prompts based on selected datasource's schema. Suggests relevant dashboards like "HR attrition analysis" for HR datasets.
 - **Dashboard email reports** — SMTP configuration stored in `smtp_config` table. Dashboards rendered as HTML email with styled KPIs, tables, and insights.
 - **Dashboard iteration** — Users can iterate on dashboards with feedback. Iteration history is stored.
 - **Dashboard tabs** — Multiple dashboards displayed as horizontal tabs with animated underline. Each tab has delete button.
@@ -139,6 +141,7 @@ stop.sh         → Stop all services
 - `POST /datasources/{id}/refresh-schema` — Re-introspect schema
 
 ### Dashboards
+- `GET /dashboards/suggested-prompts` — Get AI-generated dashboard prompts based on datasource
 - `POST /dashboards/generate` — Generate AI dashboard from prompt + datasource
 - `GET /dashboards` — List all saved dashboards
 - `GET /dashboards/{id}` — Get a single dashboard
@@ -225,7 +228,7 @@ cd frontend && npm test
 
 - PandasAI **requires Python < 3.12**. Must use Python 3.11.
 - SQLite metadata DB is auto-created on startup. Delete it to reset.
-- Chart PNGs accumulate in `backend/app/static/charts/`.
+- Chart PNGs are filtered by timestamp to only show charts generated during current query (prevents stale chart reuse).
 - Threshold conditions use `simpleeval` for safe evaluation (no `eval()`).
 - Demo users are auto-seeded on first startup.
 - **seaborn must be installed** in the backend venv — PandasAI generates code using it for correlation/scatter plots.

@@ -120,3 +120,77 @@ def _fallback_questions() -> List[SuggestedQuestion]:
         SuggestedQuestion(text="What is the average attrition rate by department?", category="distribution", icon_hint="chart"),
         SuggestedQuestion(text="Show employee performance rating distribution", category="distribution", icon_hint="chart"),
     ]
+
+
+# Dashboard prompts cache
+_dashboard_prompts_cache: Dict[str, Tuple[float, List[str]]] = {}
+
+
+def generate_dashboard_prompts(
+    table_names: List[str],
+    schema_summary: str,
+) -> List[str]:
+    """Generate 4 dashboard prompt suggestions from the schema using LLM."""
+    key = f"dash_{_cache_key(table_names)}"
+    if key in _dashboard_prompts_cache:
+        ts, prompts = _dashboard_prompts_cache[key]
+        if time.time() - ts < _CACHE_TTL:
+            return prompts
+
+    prompt = f"""You are a data analyst. Given the following database schema, generate exactly 4 dashboard ideas that would be useful for business analysis.
+
+{schema_summary}
+
+Requirements:
+- Each prompt should describe a dashboard that provides actionable business insights
+- Include what KPIs, charts, and metrics the dashboard should show
+- Reference actual table and column names from the schema
+- Keep prompts concise (under 20 words each)
+- Cover different business perspectives: executive overview, operational metrics, trends, segmentation
+
+Return ONLY a JSON array with exactly 4 strings. Each string is a dashboard prompt.
+Example: ["Executive sales dashboard with revenue KPIs and regional breakdown", "Customer analytics with retention rates and segmentation"]
+
+Return ONLY the JSON array, no other text."""
+
+    try:
+        client = OpenAI(
+            base_url=f"{settings.ollama_base_url}/v1",
+            api_key=settings.ollama_api_token or "dummy",
+        )
+        resp = client.chat.completions.create(
+            model=settings.ollama_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        content = resp.choices[0].message.content or "[]"
+
+        # Extract JSON array from response
+        content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            content = "\n".join(lines)
+
+        raw = json.loads(content)
+        prompts = [str(p) for p in raw[:4] if p]
+
+        if prompts:
+            _dashboard_prompts_cache[key] = (time.time(), prompts)
+            logger.info("Generated %d dashboard prompts", len(prompts))
+            return prompts
+
+    except Exception as e:
+        logger.warning("Failed to generate dashboard prompts: %s", e)
+
+    return _fallback_dashboard_prompts()
+
+
+def _fallback_dashboard_prompts() -> List[str]:
+    """Return generic fallback dashboard prompts when LLM is unavailable."""
+    return [
+        "Executive overview with key KPIs and trends",
+        "Sales performance dashboard with revenue and growth metrics",
+        "Customer segmentation analysis with demographics",
+        "Monthly performance report with comparisons",
+    ]

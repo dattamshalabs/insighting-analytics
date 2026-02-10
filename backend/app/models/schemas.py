@@ -431,6 +431,11 @@ class DashboardIterationOut(BaseModel):
     created_at: datetime.datetime
 
 
+class DashboardPromptsResponse(BaseModel):
+    """Dynamic dashboard prompt suggestions based on datasource schema."""
+    prompts: List[str] = []
+
+
 # ---------------------------------------------------------------------------
 # Suggested questions (dynamic)
 # ---------------------------------------------------------------------------

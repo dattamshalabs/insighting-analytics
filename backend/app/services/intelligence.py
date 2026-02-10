@@ -33,6 +33,44 @@ from app.services.db_engine import build_connection_string, get_default_schema
 logger = logging.getLogger(__name__)
 
 
+def _extract_sql_from_code(code: str) -> Optional[str]:
+    """Extract SQL statements from PandasAI generated Python code.
+
+    PandasAI often generates code like:
+    - pd.read_sql("SELECT ...", conn)
+    - pd.read_sql_query("SELECT ...", conn)
+    - conn.execute("SELECT ...")
+    - sql = "SELECT ..." followed by pd.read_sql(sql, ...)
+    """
+    import re
+
+    if not code:
+        return None
+
+    sql_patterns = [
+        # Direct SQL in read_sql calls: pd.read_sql("SELECT ...", conn)
+        r'pd\.read_sql(?:_query)?\s*\(\s*["\']([^"\']+)["\']',
+        r'pd\.read_sql(?:_query)?\s*\(\s*"""([^"]+)"""',
+        r"pd\.read_sql(?:_query)?\s*\(\s*'''([^']+)'''",
+        # SQL assigned to variable: sql = "SELECT ..."
+        r'(?:sql|query)\s*=\s*["\']([^"\']+)["\']',
+        r'(?:sql|query)\s*=\s*"""([^"]+)"""',
+        r"(?:sql|query)\s*=\s*'''([^']+)'''",
+        # f-string SQL: f"SELECT ... FROM {table}"
+        r'(?:sql|query)\s*=\s*f["\']([^"\']+)["\']',
+    ]
+
+    for pattern in sql_patterns:
+        matches = re.findall(pattern, code, re.IGNORECASE | re.DOTALL)
+        for match in matches:
+            sql = match.strip()
+            # Validate it looks like SQL
+            if sql.upper().startswith(('SELECT', 'WITH', 'SHOW', 'DESCRIBE')):
+                return sql
+
+    return None
+
+
 class OllamaCloudLLM(LLM):
     """PandasAI v3-compatible LLM that calls Ollama Cloud via native API."""
 
@@ -309,6 +347,10 @@ async def process_query(
     chart_url = None
     stats_result = None
 
+    # Record start time to filter only charts generated during this query
+    import time
+    query_start_time = time.time()
+
     with obs_svc.track_latency("pandasai_query") as timing:
         try:
             full_query = query
@@ -328,24 +370,46 @@ async def process_query(
         last_code = dl.last_code_generated
         if last_code:
             generated_code = last_code
+            # Try to extract SQL from the generated code
+            generated_sql = _extract_sql_from_code(last_code)
     except Exception:
         pass
 
+    # Log the query execution for admin observability
+    if generated_sql:
+        try:
+            rows_returned = None
+            if isinstance(result, pd.DataFrame):
+                rows_returned = len(result)
+            obs_svc.log_query(
+                db,
+                datasource_id=datasource_id,
+                sql=generated_sql,
+                rows_returned=rows_returned,
+                duration_ms=timing.get("elapsed_ms", 0),
+            )
+        except Exception as e:
+            logger.warning("Failed to log query: %s", e)
+
     # Check for chart — PandasAI saves temp charts to {project_root}/exports/charts/
+    # Only include charts generated AFTER query_start_time to avoid returning stale charts
     import shutil
     pandasai_chart_dir = Path("exports/charts")
     if pandasai_chart_dir.exists():
         temp_charts = list(pandasai_chart_dir.glob("*.png"))
-        if temp_charts:
-            latest = max(temp_charts, key=lambda p: p.stat().st_mtime)
+        # Filter to only charts created during this query
+        recent_charts = [c for c in temp_charts if c.stat().st_mtime >= query_start_time]
+        if recent_charts:
+            latest = max(recent_charts, key=lambda p: p.stat().st_mtime)
             dest = chart_dir / latest.name
             shutil.copy2(str(latest), str(dest))
             chart_url = f"/static/charts/{latest.name}"
-    # Also check our own chart dir
+    # Also check our own chart dir (only recent charts)
     if not chart_url:
         charts = list(chart_dir.glob("*.png"))
-        if charts:
-            latest_chart = max(charts, key=lambda p: p.stat().st_mtime)
+        recent_charts = [c for c in charts if c.stat().st_mtime >= query_start_time]
+        if recent_charts:
+            latest_chart = max(recent_charts, key=lambda p: p.stat().st_mtime)
             chart_url = f"/static/charts/{latest_chart.name}"
 
     # 7. PII masking

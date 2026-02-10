@@ -475,6 +475,8 @@ export default function DashboardsPage() {
   const [selectedDs, setSelectedDs] = useState("");
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [emailTarget, setEmailTarget] = useState<DashboardResponse | null>(null);
+  const [dynamicPrompts, setDynamicPrompts] = useState<string[]>([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(false);
   const { toast } = useToast();
 
   const loadDashboards = useCallback(async () => {
@@ -492,6 +494,22 @@ export default function DashboardsPage() {
     loadDashboards();
     api.getDatasources().then(setDatasources).catch(() => {});
   }, [loadDashboards]);
+
+  // Fetch dynamic prompts when datasource selection changes or modal opens
+  useEffect(() => {
+    if (!showCreate) return;
+
+    setLoadingPrompts(true);
+    api
+      .getDashboardPrompts(selectedDs || undefined)
+      .then((res) => {
+        if (res.prompts && res.prompts.length > 0) {
+          setDynamicPrompts(res.prompts);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingPrompts(false));
+  }, [showCreate, selectedDs]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -597,24 +615,33 @@ export default function DashboardsPage() {
             />
           </div>
 
-          {/* Quick templates */}
+          {/* Dynamic prompts based on datasource */}
           <div>
-            <p className="text-xs text-zinc-600 mb-2">Quick templates:</p>
+            <p className="text-xs text-zinc-600 mb-2">
+              {selectedDs ? "Suggested for this datasource:" : "Quick templates:"}
+            </p>
             <div className="flex flex-wrap gap-2">
-              {[
-                "Sales overview with KPIs and trends",
-                "Customer segmentation analysis",
-                "Revenue by product category",
-                "Monthly performance report",
-              ].map((tmpl) => (
-                <button
-                  key={tmpl}
-                  onClick={() => setPrompt(tmpl)}
-                  className="px-3 py-1.5 text-xs bg-surface-300/50 border border-white/[0.06] rounded-lg text-zinc-400 hover:text-zinc-200 hover:border-white/[0.12] transition-all"
-                >
-                  {tmpl}
-                </button>
-              ))}
+              {loadingPrompts ? (
+                <div className="flex items-center gap-2 text-xs text-zinc-600">
+                  <div className="w-3 h-3 border-2 border-zinc-600/30 border-t-zinc-400 rounded-full animate-spin" />
+                  Loading suggestions...
+                </div>
+              ) : (
+                (dynamicPrompts.length > 0 ? dynamicPrompts : [
+                  "Sales overview with KPIs and trends",
+                  "Customer segmentation analysis",
+                  "Revenue by product category",
+                  "Monthly performance report",
+                ]).map((tmpl) => (
+                  <button
+                    key={tmpl}
+                    onClick={() => setPrompt(tmpl)}
+                    className="px-3 py-1.5 text-xs bg-surface-300/50 border border-white/[0.06] rounded-lg text-zinc-400 hover:text-zinc-200 hover:border-white/[0.12] transition-all"
+                  >
+                    {tmpl}
+                  </button>
+                ))
+              )}
             </div>
           </div>
 

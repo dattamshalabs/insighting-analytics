@@ -349,3 +349,50 @@ cd frontend && npm test
 - `/frontend/src/app/dashboards/page.tsx`
 - `/frontend/src/app/alerts/page.tsx`
 - `/frontend/src/app/glossary/page.tsx`
+
+---
+
+## Additional Improvements (v0.4.1)
+
+### View SQL Query Feature
+**Files Modified:**
+- `/backend/app/services/intelligence.py` - Extract SQL from PandasAI generated code using regex
+- `/frontend/src/components/chat/ThoughtProcess.tsx` - Prominent "View SQL Query" button
+- `/frontend/src/app/page.tsx` - Display SQL button alongside recommendations
+
+**Implementation:**
+- Added `_extract_sql_from_code()` function to parse SQL from PandasAI's Python code
+- SQL extraction supports: `pd.read_sql()`, `pd.read_sql_query()`, variable assignments
+- Button styled to match "Get AI Recommendations" button (cyan theme)
+
+### Dynamic Dashboard Prompts
+**Files Modified:**
+- `/backend/app/services/question_generator.py` - Added `generate_dashboard_prompts()` function
+- `/backend/app/api/dashboards.py` - Added `/dashboards/suggested-prompts` endpoint
+- `/backend/app/models/schemas.py` - Added `DashboardPromptsResponse` schema
+- `/frontend/src/lib/api.ts` - Added `getDashboardPrompts()` API function
+- `/frontend/src/app/dashboards/page.tsx` - Fetch and display dynamic prompts on datasource change
+
+**Implementation:**
+- LLM generates 4 dashboard prompts based on datasource schema
+- Prompts are cached for 30 minutes
+- Falls back to generic prompts if LLM unavailable
+- UI shows "Suggested for this datasource:" when datasource selected
+
+### Query Logging Fix
+**Files Modified:**
+- `/backend/app/services/intelligence.py` - Call `log_query()` after SQL extraction
+
+**Implementation:**
+- Extracted SQL is now logged to query logs
+- Includes rows_returned count for DataFrames
+- Admin panel now shows executed queries
+
+### Chart Timestamp Fix
+**Files Modified:**
+- `/backend/app/services/intelligence.py` - Filter charts by query start timestamp
+
+**Implementation:**
+- Records `query_start_time` before PandasAI execution
+- Only returns charts with mtime >= query_start_time
+- Prevents stale charts from previous queries being returned

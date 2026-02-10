@@ -2,23 +2,66 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.models.orm import User
+from app.models.orm import Datasource, User
 from app.models.schemas import (
     DashboardEmailRequest,
     DashboardGenerateRequest,
     DashboardIterateRequest,
     DashboardIterationOut,
     DashboardOut,
+    DashboardPromptsResponse,
 )
 from app.services import dashboard as dash_svc
 from app.services import email_service
+from app.services import question_generator
+from app.services import schema_registry
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
+
+
+@router.get("/suggested-prompts", response_model=DashboardPromptsResponse)
+async def get_suggested_prompts(
+    datasource_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get AI-generated dashboard prompt suggestions based on datasource schema."""
+    if not datasource_id:
+        # Return generic prompts if no datasource specified
+        return DashboardPromptsResponse(
+            prompts=question_generator._fallback_dashboard_prompts()
+        )
+
+    # Get datasource
+    ds = db.query(Datasource).filter(Datasource.id == datasource_id).first()
+    if not ds:
+        return DashboardPromptsResponse(
+            prompts=question_generator._fallback_dashboard_prompts()
+        )
+
+    # Get schema context
+    schema_ctx = schema_registry.get_schema_context(datasource_id)
+    if not schema_ctx:
+        return DashboardPromptsResponse(
+            prompts=question_generator._fallback_dashboard_prompts()
+        )
+
+    # Extract table names from context (simple parse)
+    table_names = []
+    for line in schema_ctx.split("\n"):
+        if line.strip().startswith("Table:"):
+            table_name = line.split("Table:")[1].strip().split()[0]
+            table_names.append(table_name)
+
+    prompts = question_generator.generate_dashboard_prompts(table_names, schema_ctx)
+    return DashboardPromptsResponse(prompts=prompts)
 
 
 @router.post("/generate", response_model=DashboardOut, status_code=201)
